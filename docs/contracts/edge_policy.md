@@ -14,7 +14,7 @@
 ## 版本管理
 
 ```text
-candidate ──(影子验证: samples ≥ min_validation_samples,
+candidate ──(旁路比对: samples ≥ min_validation_samples,
              veto_rate ≤ max_veto_rate, success_rate ≥ active)──▶ promote → active
 active ──(连续失败 ≥ rollback_failure_streak)──▶ rollback → previous / 规则兜底
 ```

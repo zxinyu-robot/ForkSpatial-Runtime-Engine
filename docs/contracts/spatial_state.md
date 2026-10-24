@@ -12,7 +12,7 @@
   不向 Sport 下发运动指令。`mission::MissionOrchestrator` 定位为参考执行器 / 测试夹具，不再扩功能。
 - **Go2 的位姿、地图、Frontier 是派生状态**，经 `cognition::GeometricObservation` 一侧的适配器进入
   认知层；只有需要增量因子 / 优化事务的地方才接 `runtime::SpatialRuntime`。
-- **先影子运行再进决策路径**：Runtime 的建议先只记录到 fragment log，与 BT 实际决策并排比对；
+- **先旁路运行（只记录不控制）再进决策路径**：Runtime 的建议先只记录到 fragment log，与 BT 实际决策并排比对；
   正确率达标后再允许进入受限行为选择。
 
 ## 1. 身份与版本链 `AssetRef`

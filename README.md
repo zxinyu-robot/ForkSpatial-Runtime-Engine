@@ -53,7 +53,7 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 
 - `RuleBasedTokenEncoder` + `TokenStore`：规则化语义编码；资源生命周期 Valid → Stale → Evicted；拒收 revision 回退；会话 / 坐标系整体作废。
 - `EchoStateMemory`：确定性稀疏储备池，按谱半径缩放、带泄漏积分；重置规则包括任务切换、定位重置、跨楼层；支持 washout 和快照恢复。
-- `EdgePolicyManager`：active / candidate 双策略；影子验证门槛（样本数、否决率、成功率）；连续失败回滚；规则兜底。
+- `EdgePolicyManager`：active / candidate 双策略；旁路比对门槛（样本数、否决率、成功率）；连续失败回滚；规则兜底。
 
 状态内核（`src/runtime/`）：
 

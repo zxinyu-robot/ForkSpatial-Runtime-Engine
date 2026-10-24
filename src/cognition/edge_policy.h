@@ -89,7 +89,7 @@ struct ValidationStats {
 };
 
 // 端侧策略管理：实时路径只用 active；学习只更新 candidate，
-// 影子验证通过后才 promote；连续失败回滚到上一版本；无可用策略回退规则兜底。
+// 旁路比对（候选只算不执行，与实际结果对比）通过后才 promote；连续失败回滚到上一版本；无可用策略回退规则兜底。
 class EdgePolicyManager {
 public:
     EdgePolicyManager(EdgePolicyConfig config, std::size_t feature_dim);
