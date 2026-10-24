@@ -1,5 +1,6 @@
 add_library(fork_spatial_contract
   spatial_state.cpp
+  fault_injection.cpp
 )
 add_library(fork_spatial::contract ALIAS fork_spatial_contract)
 

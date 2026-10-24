@@ -1,5 +1,6 @@
 // 空间状态契约失效用例：定位重置 / 跨楼层 / 过期 Token / 地图版本不一致 /
 // 规划失败 / 安全否决 / 执行超时。每项验证 Runtime 停止使用旧证据。
+#include "contract/fault_injection.h"
 #include "contract/spatial_state.h"
 #include "cognition/edge_policy.h"
 #include "cognition/semantic_token.h"
@@ -226,6 +227,76 @@ void case_intent_contract() {
            "intent: recovery outcome records verified continuation state");
 }
 
+// ---------- 故障注入框架 v1：失效用例 → 可自动注入场景 ----------
+void case_fault_injection() {
+    using fork_spatial::contract::AdmitDisposition;
+    using fork_spatial::contract::FaultKind;
+    using fork_spatial::contract::FaultStep;
+    using fork_spatial::contract::LeaseDisposition;
+    using fork_spatial::contract::LocalizationMode;
+    using fork_spatial::contract::ReasonCode;
+    using fork_spatial::contract::healthy_world;
+    using fork_spatial::contract::run_scenario;
+
+    // 场景 1：定位丢失 → Hold → 恢复后 Accept
+    {
+        auto results = run_scenario(healthy_world(), {
+            {FaultKind::LocalizationLost, 500},
+            {FaultKind::Recover, 500},
+        });
+        expect(results[0].admit.disposition == AdmitDisposition::Hold, "fault: results[0].admit.disposition == AdmitDisposition::Hold");
+        expect(results[0].admit.reason == ReasonCode::LocalizationLost, "fault: results[0].admit.reason == ReasonCode::LocalizationLost");
+        expect(results[1].admit.disposition == AdmitDisposition::Accept, "fault: results[1].admit.disposition == AdmitDisposition::Accept");
+    }
+
+    // 场景 2：位姿跳变（定位重置）→ 位姿锚定状态 Reverify；换图 → Reject
+    {
+        auto world = healthy_world();
+        world.header.asset.pose_anchored = true;
+        world.expected.pose_anchored = true;
+        auto results = run_scenario(world, {
+            {FaultKind::LocalizationEpochBump, 100},
+            {FaultKind::GenerationBump, 100},
+        });
+        expect(results[0].admit.disposition == AdmitDisposition::Reverify, "fault: results[0].admit.disposition == AdmitDisposition::Reverify");
+        expect(results[0].admit.reason == ReasonCode::LocalizationLost, "fault: results[0].admit.reason == ReasonCode::LocalizationLost");
+        expect(results[1].admit.disposition == AdmitDisposition::Reject, "fault: results[1].admit.disposition == AdmitDisposition::Reject");
+        expect(results[1].admit.reason == ReasonCode::AssetStale, "fault: results[1].admit.reason == ReasonCode::AssetStale");
+    }
+
+    // 场景 3：过期 Token + 断链
+    {
+        auto results = run_scenario(healthy_world(), {
+            {FaultKind::Expired, 100},
+            {FaultKind::LinkLost, 50},
+        });
+        expect(results[0].admit.disposition == AdmitDisposition::Reject, "fault: results[0].admit.disposition == AdmitDisposition::Reject");
+        expect(results[0].admit.reason == ReasonCode::AssetStale, "fault: results[0].admit.reason == ReasonCode::AssetStale");
+        // 断链按契约只上报，不改准入判决（状态仍过期）
+        expect(results[1].admit.disposition == AdmitDisposition::Reject, "fault: results[1].admit.disposition == AdmitDisposition::Reject");
+    }
+
+    // 场景 4：过期执行者 + 租约过期 + 开始截止错过
+    {
+        auto world = healthy_world();
+        world.lease.start_deadline_ns = 5'000;
+        auto results = run_scenario(world, {
+            {FaultKind::WrongOwnerEpoch, 0},
+            {FaultKind::LeaseExpired, 100},
+            {FaultKind::DeadlineMiss, 0},
+        });
+        expect(results[0].lease == LeaseDisposition::StaleEpoch, "fault: results[0].lease == LeaseDisposition::StaleEpoch");
+        expect(results[1].lease == LeaseDisposition::StaleEpoch, "fault: epoch checked before expiry");
+        expect(results[2].lease == LeaseDisposition::StaleEpoch, "fault: epoch still guards");
+
+        // 干净世界只注入 deadline miss
+        auto world2 = healthy_world();
+        world2.lease.start_deadline_ns = 5'000;
+        auto r2 = run_scenario(world2, {{FaultKind::DeadlineMiss, 6'000}});
+        expect(r2[0].lease == LeaseDisposition::DeadlineMissed, "fault: r2[0].lease == LeaseDisposition::DeadlineMissed");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -239,9 +310,11 @@ int main() {
     case_delta_out_of_order();
     case_stale_executor();
     case_intent_contract();
+    case_fault_injection();
     if (failures == 0) {
         std::cout << "contract tests passed\n";
         return EXIT_SUCCESS;
     }
     return EXIT_FAILURE;
 }
+
