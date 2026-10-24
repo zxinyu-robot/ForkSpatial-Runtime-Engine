@@ -61,7 +61,8 @@ struct MissionRequest {
 // 适配层每个控制节拍喂进来的最小机器人状态。
 struct RobotState {
     double x{}, y{}, z{};
-    double speed_mps{0.0};
+    double yaw{};                   // 机体朝向（escape 目标计算需要）
+    double speed_mps{0.0};          // 建议喂滤波后速度（真机 odom twist 噪声大）
     bool localization_valid{true};
     bool localization_jump{false};  // 漂移跳变（里程计跳变超阈值）
     Timestamp stamp_ns{};
@@ -112,8 +113,11 @@ struct OrchestratorConfig {
 // 规则：
 //   - 到达判定 = 距离 ≤ tolerance 且速度 ≤ reach_stable_speed 且已执行
 //     满 min_execute_before_reach_s；不得仅凭位姿更新判定。
-//   - 定位失效或轨迹超时 -> StopTrajectory + 恢复阶梯（重派发 →
-//     escape 步骤 → recovery_wait → 上限后 mission_failed）。
+//   - 恢复阶梯（对齐 Python 编排器）：stuck → RecoveryWait → 重派发
+//     （≤stuck_redispatch_max）→ PlanFailHold → Escape（backup →
+//     sidestep，沿正常目标链路执行，步完成 = 位移超 progress_delta
+//     或 escape_step_timeout）→ 重派发；PlanFailHold 次数超
+//     max_plan_fail_recovery -> Failed。定位失效 -> StopTrajectory。
 //   - 只有最终子目标到达才 Succeeded；中间子目标到达继续派发。
 class MissionOrchestrator {
 public:
@@ -127,6 +131,9 @@ public:
     MissionCommand tick(const RobotState& state, bool planner_ready);
     void on_plan_failed();
     void on_planner_ready();
+    // 位姿图优化/重定位收敛后的无感纠偏：重新派发当前子目标。
+    // Go2 侧对应 /lio/backend/pgo_state OPTIMIZING→APPLIED。
+    void on_pose_corrected();
 
     MissionStatus status() const;
     std::size_t current_subgoal() const;
