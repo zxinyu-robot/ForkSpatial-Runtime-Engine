@@ -1,6 +1,7 @@
 #ifndef FORK_SPATIAL_COGNITION_SEMANTIC_TOKEN_H
 #define FORK_SPATIAL_COGNITION_SEMANTIC_TOKEN_H
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -105,7 +106,7 @@ struct GeometricObservation {
     double localization_quality{0.0};
     double occupancy_ratio{0.0};
     double robot_x{}, robot_y{}, robot_z{};
-    std::optional<std::vector<double>> goal;
+    std::optional<std::array<double, 3>> goal;
     std::vector<FrontierObservation> frontiers;
     std::uint32_t recent_failures{};
 };

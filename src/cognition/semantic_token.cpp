@@ -158,11 +158,11 @@ std::vector<SemanticToken> RuleBasedTokenEncoder::encode(const GeometricObservat
         out.push_back(tok);
     }
 
-    if (obs.goal && obs.goal->size() >= 3) {
+    if (obs.goal) {
         auto goal = make(kGoalTokenId, TokenKind::Goal);
         const auto& g = *obs.goal;
         const double dist = std::hypot(g[0] - obs.robot_x, g[1] - obs.robot_y, g[2] - obs.robot_z);
-        goal.anchor = g;
+        goal.anchor = {g[0], g[1], g[2]};
         goal.attributes.goal_relevance = 1.0;
         goal.attributes.priority = clamp01(0.5 + 0.5 * std::exp(-dist / config_.distance_scale_m));
         out.push_back(goal);
