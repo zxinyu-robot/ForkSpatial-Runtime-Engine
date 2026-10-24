@@ -36,7 +36,7 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 
 两条边界：**语义价值 ≠ 几何安全许可**（可行性由规划与度量安全监督否决）；**ESN 动态记忆 ≠ 长期经验库**（长期经验与策略更新归端侧学习模块）。模型推理、调度和学习都在端侧闭环，云端只负责预训练、数据分析和策略分发。
 
-契约文档：[SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [状态内核架构](docs/architecture.md)
+契约文档：[SpatialState](docs/contracts/spatial_state.md) · [SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [状态内核架构](docs/architecture.md)
 
 ## 机器人适配
 
@@ -53,7 +53,7 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 
 - `RuleBasedTokenEncoder` + `TokenStore`：规则化语义编码；资源生命周期 Valid → Stale → Evicted；拒收 revision 回退；会话 / 坐标系整体作废。
 - `EchoStateMemory`：确定性稀疏储备池，按谱半径缩放、带泄漏积分；重置规则包括任务切换、定位重置、跨楼层；支持 washout 和快照恢复。
-- `EdgePolicyManager`：active / candidate 双策略；影子验证门槛（样本数、否决率、成功率）；连续失败回滚；规则兜底。
+- `EdgePolicyManager`：active / candidate 双策略；旁路比对门槛（样本数、否决率、成功率）；连续失败回滚；规则兜底。
 
 状态内核（`src/runtime/`）：
 
@@ -128,15 +128,18 @@ src/cognition/
   behavior_memory.*   # ESN 行为时序记忆
   edge_policy.*       # 端侧决策、在线学习与版本管理
 src/mission/
-  mission_orchestrator.*  # 机器人无关任务编排（子目标推进/到达判定/恢复阶梯）
+  mission_orchestrator.*  # 参考执行器 / 测试夹具（子目标推进/到达判定/恢复阶梯）
+src/contract/
+  spatial_state.*         # 跨仓库空间状态契约：AssetRef / Stamp / LocalizationHealth / ReasonCode
 examples/cpp/
   runtime_demo.cpp
   test_spatial_runtime.cpp
   test_cognition.cpp
   test_mission.cpp
+  test_contract.cpp
 docs/
   architecture.md
-  contracts/          # SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
+  contracts/          # SpatialState / SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
 ```
 
 ## 路线图

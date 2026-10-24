@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "contract/spatial_state.h"
 #include "runtime/model.h"
 
 namespace fork_spatial::cognition {
@@ -43,6 +44,18 @@ struct ResourceRef {
     std::string asset_id;
     std::uint64_t revision{};
     std::string frame_id;
+    std::uint64_t generation{};  // 上下文代数，见 contract::AssetRef
+
+    contract::AssetRef as_asset_ref() const {
+        contract::AssetRef ref;
+        ref.robot_id = robot_id;
+        ref.session_id = session_id;
+        ref.asset_id = asset_id;
+        ref.revision = revision;
+        ref.generation = generation;
+        ref.frame_id = frame_id;
+        return ref;
+    }
 };
 
 struct SemanticToken {
@@ -80,6 +93,9 @@ public:
     std::size_t tick(Timestamp now_ns);
     std::size_t invalidate_session(std::uint32_t robot_id, std::uint32_t session_id);
     std::size_t invalidate_frame(const std::string& frame_id);
+    // 代数切换（定位重置 / 跨楼层 / 换图）：同 asset 下 generation 落后的 Token 全部失效，
+    // 不论 TTL 是否到期。
+    std::size_t invalidate_generation(const contract::AssetRef& current);
 
     std::optional<SemanticToken> find(std::uint64_t token_id) const;
     std::vector<SemanticToken> valid_tokens() const;

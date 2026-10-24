@@ -128,7 +128,7 @@ void EdgePolicyManager::report(const DecisionOutcome& outcome, const PolicyFeatu
     if (candidate_.empty()) {
         candidate_ = ReadoutPolicy(feature_dim_, next_version_++);
     }
-    // 影子验证必须先预测再训练，否则统计自我证实。
+    // 旁路比对必须先预测再训练，否则统计自我证实。
     const auto predicted = candidate_.scores(f);
     const auto pick = static_cast<BehaviorAction>(
         std::distance(predicted.begin(), std::max_element(predicted.begin(), predicted.end())));

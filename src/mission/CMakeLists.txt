@@ -9,7 +9,7 @@ target_include_directories(fork_spatial_mission
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(fork_spatial_mission PUBLIC fork_spatial::runtime)
+target_link_libraries(fork_spatial_mission PUBLIC fork_spatial::runtime fork_spatial::contract)
 target_compile_features(fork_spatial_mission PUBLIC cxx_std_20)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
