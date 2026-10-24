@@ -30,10 +30,14 @@ UpsertCode TokenStore::upsert(SemanticToken token) {
         token.resource.frame_id.empty()) {
         return UpsertCode::RejectedInvalid;
     }
-    // 墓碑：id 已逐出后拒绝更旧 revision 的延迟观测复活
-    if (auto tomb = tombstone_revision_.find(token.token_id);
-        tomb != tombstone_revision_.end() &&
-        token.resource.revision < tomb->second) {
+    // 墓碑按 owner 隔离：只挡被逐出会话自身的更旧延迟观测复活；
+    // 编码器跨会话复用 token_id，新会话不受旧墓碑约束
+    auto tomb = tombstone_.find(token.token_id);
+    const bool tomb_match =
+        tomb != tombstone_.end() &&
+        tomb->second.robot_id == token.resource.robot_id &&
+        tomb->second.session_id == token.resource.session_id;
+    if (tomb_match && token.resource.revision < tomb->second.revision) {
         return UpsertCode::RejectedStaleRevision;
     }
     auto it = tokens_.find(token.token_id);
@@ -46,7 +50,13 @@ UpsertCode TokenStore::upsert(SemanticToken token) {
     }
     const bool inserted = it == tokens_.end();
     token.status = TokenStatus::Valid;
-    token.version = inserted ? 1 : it->second.version + 1;
+    // 同 owner 复活时延续 version；新 owner（新会话/新机器人）是独立谱系重计
+    token.version = inserted
+                        ? (tomb_match ? tomb->second.version + 1 : 1)
+                        : it->second.version + 1;
+    if (inserted && tomb != tombstone_.end()) {
+        tombstone_.erase(tomb);
+    }
     stale_since_.erase(token.token_id);
     tokens_[token.token_id] = std::move(token);
     ++store_version_;
@@ -66,8 +76,9 @@ std::size_t TokenStore::tick(Timestamp now_ns) {
             ++it;
         } else if (token.status == TokenStatus::Stale &&
                    now_ns - stale_since_[id] > config_.eviction_grace_ns) {
-            // 逐出即删除：记墓碑 revision 防旧观测复活，同时避免历史 token 无限堆积
-            tombstone_revision_[id] = token.resource.revision;
+            // 逐出即删除：记墓碑防旧观测复活并续 version，同时避免历史 token 无限堆积
+            tombstone_[id] = {token.resource.robot_id, token.resource.session_id,
+                              token.resource.revision, token.version};
             stale_since_.erase(id);
             it = tokens_.erase(it);
             ++changed;
@@ -86,7 +97,8 @@ std::size_t TokenStore::invalidate_session(std::uint32_t robot_id, std::uint32_t
     for (auto it = tokens_.begin(); it != tokens_.end();) {
         if (it->second.resource.robot_id == robot_id &&
             it->second.resource.session_id == session_id) {
-            tombstone_revision_[it->first] = it->second.resource.revision;
+            const auto& r = it->second.resource;
+            tombstone_[it->first] = {r.robot_id, r.session_id, r.revision, it->second.version};
             stale_since_.erase(it->first);
             it = tokens_.erase(it);
             ++changed;
@@ -104,7 +116,8 @@ std::size_t TokenStore::invalidate_frame(const std::string& frame_id) {
     std::size_t changed = 0;
     for (auto it = tokens_.begin(); it != tokens_.end();) {
         if (it->second.resource.frame_id == frame_id) {
-            tombstone_revision_[it->first] = it->second.resource.revision;
+            const auto& r = it->second.resource;
+            tombstone_[it->first] = {r.robot_id, r.session_id, r.revision, it->second.version};
             stale_since_.erase(it->first);
             it = tokens_.erase(it);
             ++changed;

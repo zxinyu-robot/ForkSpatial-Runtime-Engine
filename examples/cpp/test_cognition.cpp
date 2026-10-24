@@ -90,11 +90,21 @@ void test_eviction_hardening() {
     ghost.resource.revision = 3;
     expect(store.upsert(ghost) == UpsertCode::Inserted,
            "evicted id accepts current revision");
+    expect(store.find(ghost.token_id)->version == 3,
+           "same-owner resurrection continues version");
 
     store.invalidate_session(1, 1);
     ghost.resource.revision = 1;
     expect(store.upsert(ghost) == UpsertCode::RejectedStaleRevision,
            "invalidated id rejects older revision");
+
+    // 新会话复用同一 token_id 空间：不受旧会话墓碑约束，version 独立重计
+    auto next_session = ghost;
+    next_session.resource.session_id = 2;
+    expect(store.upsert(next_session) == UpsertCode::Inserted,
+           "new session reuses token id despite tombstone");
+    expect(store.find(ghost.token_id)->version == 1,
+           "new session lineage restarts version");
 }
 
 void test_session_invalidation() {
