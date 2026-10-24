@@ -172,24 +172,27 @@ void test_escape_ladder() {
 
     // 移动到 backup 点附近 -> 位移 > delta -> 进入 sidestep
     cmds.clear();
-    const MissionCommand* side = nullptr;
-    for (int i = 0; i < 40 && !side; ++i, t += 0.5) {
+    MissionCommand side;
+    bool got_side = false;
+    for (int i = 0; i < 40 && !got_side; ++i, t += 0.5) {
         auto out = drive(o, at_yaw(0.4, 0, 0.35, 0.0, 0.1, t), true);
-        side = last_dispatch(out);
+        if (const auto* d = last_dispatch(out)) { side = *d; got_side = true; }
     }
-    expect(side && side->reason == "escape:sidestep", "sidestep escape dispatched");
-    expect(side && std::abs(side->target.x - 0.4) < 1e-6 &&
-                   std::abs(side->target.y - 0.35) < 1e-6, "sidestep target geometry");
+    expect(got_side && side.reason == "escape:sidestep", "sidestep escape dispatched");
+    expect(got_side && std::abs(side.target.x - 0.4) < 1e-6 &&
+                   std::abs(side.target.y - 0.35) < 1e-6, "sidestep target geometry");
 
     // sidestep 到位 -> escape_done -> plan_fail_recovery_done -> Running 重派发
-    const MissionCommand* re = nullptr;
-    for (int i = 0; i < 40 && !re; ++i, t += 0.5) {
+    MissionCommand re;
+    bool got_re = false;
+    for (int i = 0; i < 40 && !got_re; ++i, t += 0.5) {
         auto out = drive(o, at_yaw(0.4, 0.3, 0.35, 0.0, 0.1, t), true);
-        const auto* d = last_dispatch(out);
-        if (d && d->reason.empty()) re = d;
+        if (const auto* d = last_dispatch(out); d && d->reason.empty()) {
+            re = *d; got_re = true;
+        }
     }
     expect(o.status() == MissionStatus::Running, "escape ladder back to running");
-    expect(re && re->reason.empty(), "current subgoal redispatched after escape");
+    expect(got_re, "current subgoal redispatched after escape");
 }
 
 void test_pose_corrected() {
