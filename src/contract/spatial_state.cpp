@@ -20,6 +20,19 @@ bool validate(const AssetRef& ref, std::string& error) {
     return true;
 }
 
+DeltaDisposition dispose(const DeltaRef& delta, const AssetRef& local) noexcept {
+    if (delta.asset_id != local.asset_id || delta.generation != local.generation) {
+        return DeltaDisposition::StaleGeneration;
+    }
+    if (delta.target_revision <= local.revision) {
+        return DeltaDisposition::AlreadyApplied;
+    }
+    if (delta.base_revision == local.revision) {
+        return DeltaDisposition::Apply;
+    }
+    return DeltaDisposition::MissingDeltas;
+}
+
 std::string_view name(ReasonCode code) noexcept {
     switch (code) {
         case ReasonCode::None: return "none";
@@ -35,6 +48,7 @@ std::string_view name(ReasonCode code) noexcept {
         case ReasonCode::AssetStale: return "asset_stale";
         case ReasonCode::LinkLost: return "link_lost";
         case ReasonCode::SafetyVeto: return "safety_veto";
+        case ReasonCode::ResyncRequired: return "resync_required";
         case ReasonCode::Timeout: return "timeout";
         case ReasonCode::Canceled: return "canceled";
     }

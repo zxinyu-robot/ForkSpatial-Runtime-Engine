@@ -23,6 +23,8 @@ struct AssetRef {
     std::uint64_t revision{};
     std::uint64_t generation{};
     std::string frame_id;
+    std::string asset_type;        // occupancy / octvox / tile / pose_graph …（可选）
+    std::uint64_t content_hash{};  // 已提交内容的校验，0 = 未提供
 
     bool operator==(const AssetRef&) const = default;
 };
@@ -30,6 +32,26 @@ struct AssetRef {
 // 同一 asset_id 下，生命周期上 b 是否仍可消费为 a 的同代状态。
 [[nodiscard]] bool same_generation(const AssetRef& a, const AssetRef& b) noexcept;
 [[nodiscard]] bool validate(const AssetRef& ref, std::string& error);
+
+// ---------- 1b. 增量同步 ----------
+// 身份(asset_id) / 版本(revision) / 传输编码(codec) 三者严格分开：Token 流只是编码，
+// 不承担资产身份。增量必须声明基线版本；消费方基线不符不得盲目应用，先补齐或要快照。
+struct DeltaRef {
+    std::string asset_id;
+    std::uint64_t base_revision{};
+    std::uint64_t target_revision{};
+    std::uint64_t generation{};
+    std::string codec_id;      // raw_diff / quantized / token_stream …
+    std::uint64_t checksum{};  // 解码后校验，0 = 未提供
+};
+
+enum class DeltaDisposition : std::uint8_t {
+    Apply,            // base == 本地 revision
+    AlreadyApplied,   // target <= 本地 revision
+    MissingDeltas,    // 本地落后于 base 或与区间交叠 → 补齐缺失增量或请求快照
+    StaleGeneration,  // asset / generation 不匹配 → 丢弃并重同步
+};
+[[nodiscard]] DeltaDisposition dispose(const DeltaRef& delta, const AssetRef& local) noexcept;
 
 // ---------- 2. 时间 ----------
 enum class ClockDomain : std::uint8_t {
@@ -62,6 +84,7 @@ enum class ReasonCode : std::uint8_t {
     AssetStale,            // generation 不匹配，旧状态被拒
     LinkLost,              // 断链（仅上报；端侧继续本地自主）
     SafetyVeto,            // 度量层否决（含类别无关的障碍、原玻璃分支）
+    ResyncRequired,        // 增量基线缺失 / 校验失败，需补齐或快照
     Timeout,               // 任务级超时
     Canceled,
 };

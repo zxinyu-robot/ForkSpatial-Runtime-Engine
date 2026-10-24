@@ -141,6 +141,21 @@ void case_timeout() {
            "unusable mode without reason defaults to LocalizationLost");
 }
 
+void case_delta_out_of_order() {
+    const auto local = floor("b1/f2/map", 42, 1);
+    DeltaRef d{"b1/f2/map", 42, 43, 1, "token_stream", 0};
+    expect(dispose(d, local) == DeltaDisposition::Apply, "delta: base matches → apply");
+    expect(dispose(d, floor("b1/f2/map", 40, 1)) == DeltaDisposition::MissingDeltas,
+           "delta: local at 40 must not apply delta(base=42)");
+    expect(dispose(d, floor("b1/f2/map", 43, 1)) == DeltaDisposition::AlreadyApplied,
+           "delta: duplicate delivery is a no-op");
+    expect(dispose(d, floor("b1/f2/map", 42, 2)) == DeltaDisposition::StaleGeneration,
+           "delta: generation changed → discard and resync");
+    expect(dispose(d, floor("b1/f3/map", 42, 1)) == DeltaDisposition::StaleGeneration,
+           "delta: other asset → discard");
+    expect(name(ReasonCode::ResyncRequired) == "resync_required", "resync name");
+}
+
 }  // namespace
 
 int main() {
@@ -151,6 +166,7 @@ int main() {
     case_plan_failed();
     case_safety_veto();
     case_timeout();
+    case_delta_out_of_order();
     if (failures == 0) {
         std::cout << "contract tests passed\n";
         return EXIT_SUCCESS;

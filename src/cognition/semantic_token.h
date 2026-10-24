@@ -47,7 +47,14 @@ struct ResourceRef {
     std::uint64_t generation{};  // 上下文代数，见 contract::AssetRef
 
     contract::AssetRef as_asset_ref() const {
-        return {robot_id, session_id, asset_id, revision, generation, frame_id};
+        contract::AssetRef ref;
+        ref.robot_id = robot_id;
+        ref.session_id = session_id;
+        ref.asset_id = asset_id;
+        ref.revision = revision;
+        ref.generation = generation;
+        ref.frame_id = frame_id;
+        return ref;
     }
 };
 

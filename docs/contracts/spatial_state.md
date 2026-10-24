@@ -31,6 +31,23 @@
 - `generation` 变 ⇒ `TokenStore::invalidate_generation()`，**TTL 未到也作废**；`admit()` 返回 `AssetStale`。
 - `frame_id` 为空 ⇒ `validate()` 拒收，不允许隐式 world/map。
 
+`AssetRef` 另有可选 `asset_type`、`content_hash`。**Token 流不是身份**：`SemanticToken.token_id` 与
+`asset_id` 分离，编码器 / 量化参数变化不改变资产身份。
+
+## 1b. 增量同步 `DeltaRef` / `dispose()`
+
+增量必须声明基线：`DeltaRef{asset_id, base_revision, target_revision, generation, codec_id, checksum}`。
+
+```
+asset / generation 不匹配      → StaleGeneration（丢弃，重同步）
+target_revision <= 本地 revision → AlreadyApplied（重复投递，幂等）
+base_revision == 本地 revision   → Apply
+否则（本地落后 / 区间交叠）      → MissingDeltas（补齐缺失增量或请求快照；上报 ResyncRequired）
+```
+
+本地在 40、收到 `delta(base=42→43)` 时不得盲目应用——这是三个仓库目前都没有定义的规则。
+`codec_id` 只是同步层内部的编码选择（原始差分 / 量化 / Token 流），资产层不感知。
+
 ## 2. 时间 `Stamp`
 
 `stamp_ns` + `valid_until_ns`（0 = 不设）+ `ClockDomain{Monotonic, WallUtc}`，统一 **ns**。
@@ -53,6 +70,7 @@ LNR 的 ms 字段在适配层乘 1e6；Go2 信封的 ns-or-ms 二选一在适配
 | `AssetStale` | `context_generation` 不匹配拒收 | — |
 | `LinkLost` | 边端 TTL/session 校验失败 | — |
 | `SafetyVeto` | `glass_slow_mode`、`glass_trap`、度量层否决（`detail` 存原事件名） | — |
+| `ResyncRequired` | 增量基线缺失 / 校验失败（`dispose()` 返回 `MissingDeltas`） | — |
 | `Timeout` | 任务超时 | — |
 | `Canceled` | `mission_canceled` | — |
 
@@ -99,3 +117,4 @@ mode 不可用       → health.reason（为 None 时退化为 LocalizationLost�
 | 规划失败 | `mission::FailureCode == contract::ReasonCode`；fallback 必带 `degrade_reason` |
 | 安全否决 | `vetoed && failure_code == SafetyVeto` |
 | 执行超时 | `Timeout` / `RelocalizationTimeout` 命名；不可用 mode 无 reason 时退化为 `LocalizationLost` |
+| 增量乱序 / 缺失 | 本地 40 不得应用 `delta(42→43)`；重复投递幂等；代数变化丢弃 |
