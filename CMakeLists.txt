@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(
   fork_spatial_runtime
   VERSION 0.1.0
-  DESCRIPTION "Backend-agnostic incremental spatial-state runtime"
+  DESCRIPTION "Semantic-state, behavior-memory and edge continual-learning runtime"
   LANGUAGES CXX
 )
 
