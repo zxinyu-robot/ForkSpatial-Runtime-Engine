@@ -105,6 +105,16 @@ void test_eviction_hardening() {
            "new session reuses token id despite tombstone");
     expect(store.find(ghost.token_id)->version == 1,
            "new session lineage restarts version");
+
+    // 旧会话的延迟观测（rev 高于新会话活 token、低于其自身墓碑）仍被挡，
+    // 不得覆盖新会话的 token
+    auto straggler = ghost;
+    straggler.resource.revision = 2;
+    straggler.stamp_ns = 200;
+    expect(store.upsert(straggler) == UpsertCode::RejectedStaleRevision,
+           "old-session straggler cannot overwrite new session token");
+    expect(store.find(ghost.token_id)->resource.session_id == 2,
+           "live token still belongs to new session");
 }
 
 void test_session_invalidation() {

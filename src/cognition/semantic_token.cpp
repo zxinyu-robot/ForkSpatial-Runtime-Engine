@@ -54,9 +54,8 @@ UpsertCode TokenStore::upsert(SemanticToken token) {
     token.version = inserted
                         ? (tomb_match ? tomb->second.version + 1 : 1)
                         : it->second.version + 1;
-    if (inserted && tomb != tombstone_.end()) {
-        tombstone_.erase(tomb);
-    }
+    // 墓碑保留：每 id 仅一条、逐出时覆写，不随次数堆积；保留它才能在活 token
+    // 属于新会话时继续挡住旧会话低 revision 的延迟观测
     stale_since_.erase(token.token_id);
     tokens_[token.token_id] = std::move(token);
     ++store_version_;
