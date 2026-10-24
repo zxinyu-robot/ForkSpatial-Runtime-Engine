@@ -30,9 +30,18 @@ UpsertCode TokenStore::upsert(SemanticToken token) {
         token.resource.frame_id.empty()) {
         return UpsertCode::RejectedInvalid;
     }
+    // 墓碑：id 已逐出后拒绝更旧 revision 的延迟观测复活
+    if (auto tomb = tombstone_revision_.find(token.token_id);
+        tomb != tombstone_revision_.end() &&
+        token.resource.revision < tomb->second) {
+        return UpsertCode::RejectedStaleRevision;
+    }
     auto it = tokens_.find(token.token_id);
-    if (it != tokens_.end() && it->second.status != TokenStatus::Evicted &&
-        token.resource.revision < it->second.resource.revision) {
+    // 同 revision 乱序到达时按观测时戳取新者，防止旧 anchor/priority 回退
+    if (it != tokens_.end() &&
+        (token.resource.revision < it->second.resource.revision ||
+         (token.resource.revision == it->second.resource.revision &&
+          token.stamp_ns < it->second.stamp_ns))) {
         return UpsertCode::RejectedStaleRevision;
     }
     const bool inserted = it == tokens_.end();
@@ -46,16 +55,24 @@ UpsertCode TokenStore::upsert(SemanticToken token) {
 
 std::size_t TokenStore::tick(Timestamp now_ns) {
     std::size_t changed = 0;
-    for (auto& [id, token] : tokens_) {
-        if (token.status == TokenStatus::Valid && now_ns - token.stamp_ns > token.ttl_ns) {
+    for (auto it = tokens_.begin(); it != tokens_.end();) {
+        const auto id = it->first;
+        auto& token = it->second;
+        if (token.status == TokenStatus::Valid &&
+            now_ns - token.stamp_ns > token.ttl_ns) {
             token.status = TokenStatus::Stale;
             stale_since_[id] = now_ns;
             ++changed;
+            ++it;
         } else if (token.status == TokenStatus::Stale &&
                    now_ns - stale_since_[id] > config_.eviction_grace_ns) {
-            token.status = TokenStatus::Evicted;
+            // 逐出即删除：记墓碑 revision 防旧观测复活，同时避免历史 token 无限堆积
+            tombstone_revision_[id] = token.resource.revision;
             stale_since_.erase(id);
+            it = tokens_.erase(it);
             ++changed;
+        } else {
+            ++it;
         }
     }
     if (changed > 0) {
@@ -66,12 +83,15 @@ std::size_t TokenStore::tick(Timestamp now_ns) {
 
 std::size_t TokenStore::invalidate_session(std::uint32_t robot_id, std::uint32_t session_id) {
     std::size_t changed = 0;
-    for (auto& [id, token] : tokens_) {
-        if (token.status != TokenStatus::Evicted && token.resource.robot_id == robot_id &&
-            token.resource.session_id == session_id) {
-            token.status = TokenStatus::Evicted;
-            stale_since_.erase(id);
+    for (auto it = tokens_.begin(); it != tokens_.end();) {
+        if (it->second.resource.robot_id == robot_id &&
+            it->second.resource.session_id == session_id) {
+            tombstone_revision_[it->first] = it->second.resource.revision;
+            stale_since_.erase(it->first);
+            it = tokens_.erase(it);
             ++changed;
+        } else {
+            ++it;
         }
     }
     if (changed > 0) {
@@ -82,11 +102,14 @@ std::size_t TokenStore::invalidate_session(std::uint32_t robot_id, std::uint32_t
 
 std::size_t TokenStore::invalidate_frame(const std::string& frame_id) {
     std::size_t changed = 0;
-    for (auto& [id, token] : tokens_) {
-        if (token.status != TokenStatus::Evicted && token.resource.frame_id == frame_id) {
-            token.status = TokenStatus::Evicted;
-            stale_since_.erase(id);
+    for (auto it = tokens_.begin(); it != tokens_.end();) {
+        if (it->second.resource.frame_id == frame_id) {
+            tombstone_revision_[it->first] = it->second.resource.revision;
+            stale_since_.erase(it->first);
+            it = tokens_.erase(it);
             ++changed;
+        } else {
+            ++it;
         }
     }
     if (changed > 0) {

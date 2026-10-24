@@ -58,7 +58,43 @@ void test_encoder_and_lifecycle() {
     expect(store.tick(3'000'000'000) == 5, "ttl expiry marks stale");
     expect(store.valid_tokens().empty(), "no valid tokens after ttl");
     expect(store.tick(9'000'000'000) == 5, "grace expiry evicts");
-    expect(store.find(1)->status == TokenStatus::Evicted, "evicted status");
+    expect(!store.find(1).has_value(), "evicted token removed from store");
+}
+
+void test_eviction_hardening() {
+    // 逐出/失效后：更旧 revision 的延迟观测不可复活；同 revision 乱序按观测时戳取新者
+    RuleBasedTokenEncoder encoder;
+    TokenStore store;
+    const auto tokens = encoder.encode(make_observation(0));
+    for (const auto& t : tokens) {
+        store.upsert(t);
+    }
+    auto newer = tokens[3];
+    newer.stamp_ns = 100;
+    expect(store.upsert(newer) == UpsertCode::Updated,
+           "same revision newer stamp accepted");
+    auto late = tokens[3];
+    late.stamp_ns = 0;
+    expect(store.upsert(late) == UpsertCode::RejectedStaleRevision,
+           "same revision older stamp rejected");
+
+    store.tick(3'000'000'000);
+    store.tick(9'000'000'000);
+    expect(store.valid_tokens().empty() && !store.find(1001).has_value(),
+           "evicted tokens removed");
+
+    auto ghost = tokens[3];
+    ghost.resource.revision = 2;
+    expect(store.upsert(ghost) == UpsertCode::RejectedStaleRevision,
+           "evicted id rejects older revision");
+    ghost.resource.revision = 3;
+    expect(store.upsert(ghost) == UpsertCode::Inserted,
+           "evicted id accepts current revision");
+
+    store.invalidate_session(1, 1);
+    ghost.resource.revision = 1;
+    expect(store.upsert(ghost) == UpsertCode::RejectedStaleRevision,
+           "invalidated id rejects older revision");
 }
 
 void test_session_invalidation() {
@@ -213,6 +249,7 @@ void test_esn_restore_bounds() {
 
 int main() {
     test_encoder_and_lifecycle();
+    test_eviction_hardening();
     test_session_invalidation();
     test_esn_memory();
     test_edge_policy();

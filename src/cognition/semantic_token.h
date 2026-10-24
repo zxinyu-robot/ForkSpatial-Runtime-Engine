@@ -89,6 +89,8 @@ private:
     TokenStoreConfig config_;
     std::unordered_map<std::uint64_t, SemanticToken> tokens_;
     std::unordered_map<std::uint64_t, Timestamp> stale_since_;
+    // 逐出墓碑：id → 最后已知 revision，拒绝更旧的延迟观测复活
+    std::unordered_map<std::uint64_t, std::uint64_t> tombstone_revision_;
     std::uint64_t store_version_{};
 };
 
