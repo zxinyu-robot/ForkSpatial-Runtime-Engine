@@ -95,6 +95,26 @@ std::size_t TokenStore::invalidate_frame(const std::string& frame_id) {
     return changed;
 }
 
+std::size_t TokenStore::invalidate_generation(const contract::AssetRef& current) {
+    std::size_t changed = 0;
+    for (auto& [id, token] : tokens_) {
+        const auto& r = token.resource;
+        const bool same_asset = r.robot_id == current.robot_id &&
+                                r.session_id == current.session_id &&
+                                r.asset_id == current.asset_id;
+        if (token.status != TokenStatus::Evicted && same_asset &&
+            r.generation < current.generation) {
+            token.status = TokenStatus::Evicted;
+            stale_since_.erase(id);
+            ++changed;
+        }
+    }
+    if (changed > 0) {
+        ++store_version_;
+    }
+    return changed;
+}
+
 std::optional<SemanticToken> TokenStore::find(std::uint64_t token_id) const {
     auto it = tokens_.find(token_id);
     if (it == tokens_.end()) {

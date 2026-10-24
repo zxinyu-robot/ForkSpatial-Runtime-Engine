@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "contract/spatial_state.h"
 #include "runtime/model.h"
 
 namespace fork_spatial::mission {
@@ -27,15 +28,9 @@ enum class MissionStatus {
     Canceled,
 };
 
-enum class FailureCode {
-    None,
-    ReplanTimeout,       // 规划器在 plan_ready_timeout 内未产出
-    Stuck,               // 位姿无进展超过 stuck_timeout
-    PlanFailedRepeated,  // 连续规划失败超阈值
-    LocalizationLost,    // 定位失效 / 漂移跳变
-    NoWaypoints,
-    Canceled,
-};
+// 原因码统一到 contract::ReasonCode；本编排器仅为参考执行器 / 测试夹具，
+// 真机执行权在 MotionSLAM 的 BT（见 docs/contracts/spatial_state.md）。
+using FailureCode = contract::ReasonCode;
 
 enum class CommandType {
     None,

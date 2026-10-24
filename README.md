@@ -36,7 +36,7 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 
 两条边界：**语义价值 ≠ 几何安全许可**（可行性由规划与度量安全监督否决）；**ESN 动态记忆 ≠ 长期经验库**（长期经验与策略更新归端侧学习模块）。模型推理、调度和学习都在端侧闭环，云端只负责预训练、数据分析和策略分发。
 
-契约文档：[SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [状态内核架构](docs/architecture.md)
+契约文档：[SpatialState](docs/contracts/spatial_state.md) · [SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [状态内核架构](docs/architecture.md)
 
 ## 机器人适配
 
@@ -128,15 +128,18 @@ src/cognition/
   behavior_memory.*   # ESN 行为时序记忆
   edge_policy.*       # 端侧决策、在线学习与版本管理
 src/mission/
-  mission_orchestrator.*  # 机器人无关任务编排（子目标推进/到达判定/恢复阶梯）
+  mission_orchestrator.*  # 参考执行器 / 测试夹具（子目标推进/到达判定/恢复阶梯）
+src/contract/
+  spatial_state.*         # 跨仓库空间状态契约：AssetRef / Stamp / LocalizationHealth / ReasonCode
 examples/cpp/
   runtime_demo.cpp
   test_spatial_runtime.cpp
   test_cognition.cpp
   test_mission.cpp
+  test_contract.cpp
 docs/
   architecture.md
-  contracts/          # SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
+  contracts/          # SpatialState / SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
 ```
 
 ## 路线图

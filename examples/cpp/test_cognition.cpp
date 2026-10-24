@@ -118,7 +118,7 @@ void test_edge_policy() {
     for (int i = 0; i < 30; ++i) {
         memory.update(u);
         PolicyDecision explore{BehaviorAction::Explore, 1001, manager.active_version(), false, "shadow"};
-        manager.report({explore, true, false, ""}, {memory.state(), u});
+        manager.report({explore, true, false, fork_spatial::contract::ReasonCode::None}, {memory.state(), u});
     }
     expect(manager.try_promote(), "validated candidate promoted");
     expect(manager.active_version() > 0, "active policy version set");
@@ -128,7 +128,7 @@ void test_edge_policy() {
 
     for (int i = 0; i < 5; ++i) {
         PolicyDecision bad{BehaviorAction::Explore, 1001, manager.active_version(), false, "active"};
-        manager.report({bad, false, true, "unreachable"}, {memory.state(), u});
+        manager.report({bad, false, true, fork_spatial::contract::ReasonCode::SafetyVeto}, {memory.state(), u});
     }
     expect(manager.active_version() == 0, "failure streak rolls back to rule fallback");
     expect(manager.decide(tokens, u, memory).fallback, "fallback after rollback");
@@ -152,14 +152,14 @@ void test_policy_rejection_paths() {
     // 样本不足不能 promote
     for (int i = 0; i < 5; ++i) {
         PolicyDecision d{BehaviorAction::Explore, 1001, 0, false, ""};
-        manager.report({d, true, false, ""}, {memory.state(), u});
+        manager.report({d, true, false, fork_spatial::contract::ReasonCode::None}, {memory.state(), u});
     }
     expect(!manager.try_promote(), "reject promote below min samples");
 
     // 否决率过高不能 promote
     for (int i = 0; i < 10; ++i) {
         PolicyDecision d{BehaviorAction::Explore, 1001, 0, false, ""};
-        manager.report({d, false, true, "unreachable"}, {memory.state(), u});
+        manager.report({d, false, true, fork_spatial::contract::ReasonCode::SafetyVeto}, {memory.state(), u});
     }
     expect(!manager.try_promote(), "reject promote above veto rate");
 

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cognition/behavior_memory.h"
+#include "contract/spatial_state.h"
 #include "cognition/semantic_token.h"
 
 namespace fork_spatial::cognition {
@@ -28,6 +29,11 @@ struct PolicyDecision {
     std::uint64_t policy_version{};
     bool fallback{false};
     std::string reason;
+    // 契约字段（Runtime → BT）：执行层据此拒绝过期 / 跨代 / 不适用的建议。
+    std::string task_id;
+    contract::AssetRef context;        // 决策所依据的空间上下文（含 generation）
+    contract::Stamp validity;          // 建议有效期
+    contract::ReasonCode degrade_reason{contract::ReasonCode::None};  // fallback 的原因
 };
 
 // 度量层对决策的执行结果：否决 = 几何不可执行，必须回流给学习。
@@ -35,7 +41,11 @@ struct DecisionOutcome {
     PolicyDecision decision;
     bool succeeded{false};
     bool vetoed{false};
-    std::string failure_code;
+    contract::ReasonCode failure_code{contract::ReasonCode::None};
+    // 证据链（MotionSLAM → Runtime）：实际执行的策略版本与状态版本，
+    // 与 decision 内记录不一致时该样本不得计入 active 统计。
+    std::uint64_t executed_policy_version{};
+    contract::AssetRef executed_context;
 };
 
 struct EdgePolicyConfig {
