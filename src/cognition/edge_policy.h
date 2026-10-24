@@ -84,7 +84,11 @@ class EdgePolicyManager {
 public:
     EdgePolicyManager(EdgePolicyConfig config, std::size_t feature_dim);
 
-    PolicyDecision decide(const std::vector<SemanticToken>& tokens, const EchoStateMemory& memory);
+    // behavior_input 必须与最近一次喂给 memory.update() 的向量一致，
+    // 否则 active 读到的特征和 ESN 实际消费的不匹配。
+    PolicyDecision decide(const std::vector<SemanticToken>& tokens,
+                          const std::vector<double>& behavior_input,
+                          const EchoStateMemory& memory);
     void report(const DecisionOutcome& outcome, const PolicyFeatures& features);
     bool try_promote();
     bool rollback();

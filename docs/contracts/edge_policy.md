@@ -6,7 +6,7 @@
 
 | 路径 | 使用 | 约束 |
 |---|---|---|
-| 实时决策 | `decide(tokens, memory)` → `PolicyDecision{action, target_token, policy_version, fallback, reason}` | 只用 **active** 策略；不阻塞、不在线修改 |
+| 实时决策 | `decide(tokens, behavior_input, memory)`（`behavior_input` 必须与最近喂给 `memory.update()` 的向量一致） → `PolicyDecision{action, target_token, policy_version, fallback, reason}` | 只用 **active** 策略；不阻塞、不在线修改 |
 | 在线学习 | `report(outcome, features)` | 只更新 **candidate** 策略，并累积经验缓冲 |
 
 行为集合：Explore / SwitchFrontier / Wait / Recover / ReturnHome。决策输出交给任务执行层（BT-Planner / Task Runtime）落成技能序列。

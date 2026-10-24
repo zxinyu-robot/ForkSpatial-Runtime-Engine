@@ -85,6 +85,7 @@ PolicyDecision EdgePolicyManager::rule_fallback(const std::vector<SemanticToken>
 }
 
 PolicyDecision EdgePolicyManager::decide(const std::vector<SemanticToken>& tokens,
+                                         const std::vector<double>& behavior_input,
                                          const EchoStateMemory& memory) {
     if (active_.empty()) {
         return rule_fallback(tokens, "no_active_policy");
@@ -92,7 +93,7 @@ PolicyDecision EdgePolicyManager::decide(const std::vector<SemanticToken>& token
     if (!memory.warmed_up()) {
         return rule_fallback(tokens, "memory_washout");
     }
-    const auto features = concat(memory.state(), make_behavior_input(tokens, {}));
+    const auto features = concat(memory.state(), behavior_input);
     const auto s = active_.scores(features);
     const auto best = static_cast<BehaviorAction>(std::distance(s.begin(), std::max_element(s.begin(), s.end())));
     PolicyDecision d;
@@ -127,9 +128,7 @@ void EdgePolicyManager::report(const DecisionOutcome& outcome, const PolicyFeatu
     if (candidate_.empty()) {
         candidate_ = ReadoutPolicy(feature_dim_, next_version_++);
     }
-    const double reward = outcome.vetoed ? -1.0 : (outcome.succeeded ? 1.0 : -0.5);
-    candidate_.reinforce(f, outcome.decision.action, reward, config_.learning_rate);
-
+    // 影子验证必须先预测再训练，否则统计自我证实。
     const auto predicted = candidate_.scores(f);
     const auto pick = static_cast<BehaviorAction>(
         std::distance(predicted.begin(), std::max_element(predicted.begin(), predicted.end())));
@@ -138,6 +137,8 @@ void EdgePolicyManager::report(const DecisionOutcome& outcome, const PolicyFeatu
         candidate_stats_.successes += outcome.succeeded ? 1 : 0;
         candidate_stats_.vetoes += outcome.vetoed ? 1 : 0;
     }
+    const double reward = outcome.vetoed ? -1.0 : (outcome.succeeded ? 1.0 : -0.5);
+    candidate_.reinforce(f, outcome.decision.action, reward, config_.learning_rate);
 
     experience_.emplace_back(outcome, std::move(f));
     while (experience_.size() > config_.experience_capacity) {
