@@ -118,6 +118,9 @@ struct OrchestratorConfig {
 class MissionOrchestrator {
 public:
     explicit MissionOrchestrator(OrchestratorConfig config = {});
+    ~MissionOrchestrator();
+    MissionOrchestrator(const MissionOrchestrator&) = delete;
+    MissionOrchestrator& operator=(const MissionOrchestrator&) = delete;
 
     bool submit(MissionRequest request);
     bool cancel(const std::string& reason);
@@ -128,6 +131,10 @@ public:
     MissionStatus status() const;
     std::size_t current_subgoal() const;
     const std::vector<MissionEvent>& events() const;
+
+private:
+    class Core;
+    Core* core_;
 };
 
 }  // namespace fork_spatial::mission
