@@ -1,6 +1,6 @@
 # MissionOrchestrationContract
 
-任务编排层的机器人无关契约。语义从 MotionSLAM_ws 的 `demo_scan_bt_orchestrator.py`（Python BT 状态机）提炼；迁移到本仓库后，Python 版在 Go2 侧降级为过渡兜底。接口：`src/mission/mission_orchestrator.h`（本 PR 先冻结接口，实现下一 PR）。
+任务编排层的机器人无关契约。语义从 MotionSLAM_ws 的 `demo_scan_bt_orchestrator.py`（Python BT 状态机）提炼；迁移到本仓库后，Python 版在 Go2 侧降级为过渡兜底。实现：`src/mission/mission_orchestrator.{h,cpp}`（`fork_spatial::mission`）。
 
 ## 职责边界
 

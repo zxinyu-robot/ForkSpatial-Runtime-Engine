@@ -127,13 +127,16 @@ src/cognition/
   semantic_token.*    # Token 编码与资源生命周期
   behavior_memory.*   # ESN 行为时序记忆
   edge_policy.*       # 端侧决策、在线学习与版本管理
+src/mission/
+  mission_orchestrator.*  # 机器人无关任务编排（子目标推进/到达判定/恢复阶梯）
 examples/cpp/
   runtime_demo.cpp
   test_spatial_runtime.cpp
   test_cognition.cpp
+  test_mission.cpp
 docs/
   architecture.md
-  contracts/          # SemanticToken / BehaviorMemory / EdgePolicy 契约
+  contracts/          # SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
 ```
 
 ## 路线图
