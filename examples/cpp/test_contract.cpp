@@ -156,6 +156,76 @@ void case_delta_out_of_order() {
     expect(name(ReasonCode::ResyncRequired) == "resync_required", "resync name");
 }
 
+void case_stale_executor() {
+    const auto local = floor("b1/f2/map", 5, 3);
+    ExecutionLease lease{"task_1", "edge_a", 1, 7, 1'000, 5'000, local};
+    expect(dispose(lease, 1, 7, local, 2'000) == LeaseDisposition::Accept, "lease: current executor ok");
+    expect(dispose(lease, 1, 8, local, 2'000) == LeaseDisposition::StaleEpoch,
+           "lease: edge_a dropped, edge_b took over with epoch 8 → old command rejected");
+    expect(dispose(lease, 1, 7, local, 6'000) == LeaseDisposition::Expired, "lease: expired");
+    expect(dispose(lease, 2, 7, local, 2'000) == LeaseDisposition::WrongRobot, "lease: other robot");
+    expect(dispose(lease, 1, 7, floor("b1/f2/map", 5, 4), 2'000) == LeaseDisposition::StateMismatch,
+           "lease: issued on old generation → rejected");
+    expect(dispose(lease, 1, 7, local, ClockDomain::WallUtc, 2'000) == LeaseDisposition::ClockMismatch,
+           "lease: mismatched clock domain → rejected");
+    lease.start_deadline_ns = 1'500;
+    expect(dispose(lease, 1, 7, local, 2'000) == LeaseDisposition::DeadlineMissed,
+           "lease: start deadline missed");
+    lease.start_deadline_ns = 0;
+    lease.execution_timeout_ns = 500;
+    expect(dispose_running(lease, 1, 7, local, ClockDomain::Monotonic, 2'000, 2'501)
+               == LeaseDisposition::DeadlineMissed,
+           "lease: execution timeout missed");
+    ExecutionLease forever = lease;
+    forever.expiry_ns = 0;
+    expect(dispose(forever, 1, 7, local, 1'000'000'000) == LeaseDisposition::Accept,
+           "lease: expiry 0 never expires");
+}
+
+void case_intent_contract() {
+    const auto state = floor("b1/f2/map", 5, 3);
+    IntentEnvelope first;
+    first.intent_id = "intent-1";
+    first.idempotency_key = "idem-1";
+    first.lease = ExecutionLease{"task_1", "edge_a", 1, 7, 1'000, 5'000, state};
+    expect(dispose_idempotency(first, nullptr) == IdempotencyDisposition::New,
+           "intent: unseen key is new");
+    expect(dispose_idempotency(first, &first) == IdempotencyDisposition::DuplicateSame,
+           "intent: same key and content is idempotent");
+    IntentEnvelope conflict = first;
+    conflict.intent_id = "intent-2";
+    expect(dispose_idempotency(conflict, &first) == IdempotencyDisposition::ConflictDifferent,
+           "intent: same key with different content is rejected");
+
+    AssetRef pose_old = state;
+    pose_old.localization_epoch = 1;
+    pose_old.pose_anchored = true;
+    AssetRef pose_new = pose_old;
+    pose_new.localization_epoch = 2;
+    SpatialStateHeader pose_header{pose_new, Stamp{1'000, 0}, {}};
+    const auto reverify = admit(pose_header, pose_old, 2'000);
+    expect(reverify.disposition == AdmitDisposition::Reverify,
+           "intent: localization epoch change requires re-verification");
+
+    LocalizationHealth hold_health;
+    hold_health.mode = LocalizationMode::Hold;
+    hold_health.reason = ReasonCode::LocalizationLost;
+    SpatialStateHeader held{state, Stamp{1'000, 0}, hold_health};
+    const auto hold = admit(held, state, 2'000);
+    expect(hold.disposition == AdmitDisposition::Hold && hold.reason == ReasonCode::LocalizationLost,
+           "intent: uncertain state enters hold");
+
+    RecoveryOutcome outcome;
+    outcome.trigger = ReasonCode::LocalizationLost;
+    outcome.action = "relocalize";
+    outcome.duration_ns = 2'000'000;
+    outcome.cost = 1.5;
+    outcome.resumed = true;
+    outcome.post_state = state;
+    expect(outcome.resumed && outcome.post_state == state,
+           "intent: recovery outcome records verified continuation state");
+}
+
 }  // namespace
 
 int main() {
@@ -167,6 +237,8 @@ int main() {
     case_safety_veto();
     case_timeout();
     case_delta_out_of_order();
+    case_stale_executor();
+    case_intent_contract();
     if (failures == 0) {
         std::cout << "contract tests passed\n";
         return EXIT_SUCCESS;
