@@ -1,5 +1,6 @@
 #include "mission/mission_orchestrator.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -35,6 +36,21 @@ RobotState at(double x, double y, double z, double speed, double t_s, bool loc =
     s.localization_valid = loc;
     s.stamp_ns = static_cast<fork_spatial::runtime::Timestamp>(t_s * 1e9);
     return s;
+}
+
+RobotState at_yaw(double x, double y, double z, double yaw, double speed,
+                  double t_s) {
+    RobotState s = at(x, y, z, speed, t_s);
+    s.yaw = yaw;
+    return s;
+}
+
+const MissionCommand* last_dispatch(const std::vector<MissionCommand>& cmds) {
+    const MissionCommand* out = nullptr;
+    for (const auto& c : cmds) {
+        if (c.type == CommandType::DispatchSubgoal) out = &c;
+    }
+    return out;
 }
 
 std::vector<MissionCommand> drive(MissionOrchestrator& o, RobotState s, bool ready,
@@ -127,6 +143,71 @@ void test_replan_timeout() {
     expect(o.status() == MissionStatus::Recovering, "replan failures enter recovery");
 }
 
+void test_escape_ladder() {
+    auto cfg = fast_cfg();
+    cfg.escape_step_timeout_s = 5.0;
+    MissionOrchestrator o(cfg);
+    o.submit(two_subgoals());
+    for (double t : {0.1, 0.3, 0.5, 1.1}) drive(o, at(0, 0, 0.35, 0.0, t), true);
+
+    // 耗到 PlanFailHold：stuck → wait → redispatch×2 → stuck → escape 阶梯
+    std::vector<MissionCommand> cmds;
+    double t = 2.0;
+    const MissionCommand* esc = nullptr;
+    for (int i = 0; i < 300 && !esc; ++i, t += 0.5) {
+        auto out = drive(o, at_yaw(1.0, 0, 0.35, 0.0, 0.0, t), true);
+        for (const auto& c : out) {
+            cmds.push_back(c);
+            if (c.type == CommandType::DispatchSubgoal && c.reason == "escape:backup")
+                esc = &cmds.back();
+        }
+    }
+    expect(o.status() == MissionStatus::Recovering, "stuck exhaustion enters hold");
+    expect(has_cmd(cmds, CommandType::StopTrajectory), "hold stops trajectory");
+    expect(esc && esc->reason == "escape:backup", "backup escape dispatched");
+    // yaw=0 → backup = x - 0.8；sidestep = +y 0.35
+    expect(esc && std::abs(esc->target.x - 0.2) < 1e-6 &&
+                   std::abs(esc->target.y - 0.0) < 1e-6, "backup target geometry");
+    expect(esc && std::abs(esc->target.z - 0.35) < 1e-6, "escape keeps body height");
+
+    // 移动到 backup 点附近 -> 位移 > delta -> 进入 sidestep
+    cmds.clear();
+    MissionCommand side;
+    bool got_side = false;
+    for (int i = 0; i < 40 && !got_side; ++i, t += 0.5) {
+        auto out = drive(o, at_yaw(0.4, 0, 0.35, 0.0, 0.1, t), true);
+        if (const auto* d = last_dispatch(out)) { side = *d; got_side = true; }
+    }
+    expect(got_side && side.reason == "escape:sidestep", "sidestep escape dispatched");
+    expect(got_side && std::abs(side.target.x - 0.4) < 1e-6 &&
+                   std::abs(side.target.y - 0.35) < 1e-6, "sidestep target geometry");
+
+    // sidestep 到位 -> escape_done -> plan_fail_recovery_done -> Running 重派发
+    MissionCommand re;
+    bool got_re = false;
+    for (int i = 0; i < 40 && !got_re; ++i, t += 0.5) {
+        auto out = drive(o, at_yaw(0.4, 0.3, 0.35, 0.0, 0.1, t), true);
+        if (const auto* d = last_dispatch(out); d && d->reason.empty()) {
+            re = *d; got_re = true;
+        }
+    }
+    expect(o.status() == MissionStatus::Running, "escape ladder back to running");
+    expect(got_re, "current subgoal redispatched after escape");
+}
+
+void test_pose_corrected() {
+    MissionOrchestrator o(fast_cfg());
+    o.submit(two_subgoals());
+    for (double t : {0.1, 0.3, 0.5, 1.1}) drive(o, at(0, 0, 0.35, 0.0, t), true);
+    expect(o.status() == MissionStatus::Running, "running");
+
+    o.on_pose_corrected();  // PGO APPLIED
+    auto cmds = drive(o, at(0.3, 0, 0.35, 0.1, 2.0), true);
+    expect(has_cmd(cmds, CommandType::DispatchSubgoal),
+           "pose correction redispatches current subgoal");
+    expect(o.current_subgoal() == 0, "still on same subgoal");
+}
+
 void test_cancel_and_empty() {
     MissionOrchestrator o(fast_cfg());
     expect(!o.submit({}), "empty request rejected");
@@ -149,6 +230,8 @@ int main() {
     test_stuck_then_fail();
     test_localization_lost_recovery();
     test_replan_timeout();
+    test_escape_ladder();
+    test_pose_corrected();
     test_cancel_and_empty();
     if (failures > 0) return EXIT_FAILURE;
     std::cout << "mission tests passed\n";
