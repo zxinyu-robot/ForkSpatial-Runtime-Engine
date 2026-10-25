@@ -36,14 +36,14 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 
 两条边界：**语义价值 ≠ 几何安全许可**（可行性由规划与度量安全监督否决）；**ESN 动态记忆 ≠ 长期经验库**（长期经验与策略更新归端侧学习模块）。模型推理、调度和学习都在端侧闭环，云端只负责预训练、数据分析和策略分发。
 
-契约文档：[SpatialState](docs/contracts/spatial_state.md) · [SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [状态内核架构](docs/architecture.md)
+契约文档：[SpatialState](docs/contracts/spatial_state.md) · [SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [MissionOrchestration](docs/contracts/mission_orchestration.md) · [状态内核架构](docs/architecture.md)
 
 ## 机器人适配
 
 架构与机型无关，各机器人通过适配层接入：
 
-- 四足 Unitree Go2：[MotionSLAM_ws](https://github.com/zxinyu-robot/MotionSLAM_ws)（跨楼层自主探索导航 + 恢复机制）
-- 人形：[Legged Navigation Runtime](https://github.com/zxinyu-robot/legged-navigation-runtime)（定位故障恢复、多楼层导航）
+- 四足 Unitree Go2：[MotionSLAM_ws](https://github.com/zxinyu-robot/MotionSLAM_ws)（跨楼层自主导航 + 恢复机制）。BT 运行时是执行中枢，插件只提供证据或建议，不直接拿执行权；本仓库的空间状态契约通过契约桥接入 BT 运行时（`ContractGate` + 故障演练，[MotionSLAM_ws #12](https://github.com/zxinyu-robot/MotionSLAM_ws/pull/12) 审核中）。
+- 人形 / 异构恢复插件：[Legged Navigation Runtime](https://github.com/zxinyu-robot/legged-navigation-runtime)（定位故障恢复、多楼层导航）。其重定位状态机以恢复插件形式挂到 MotionSLAM BT 运行时，四足先闭环。
 - 无人机：后续接入
 - 多机弱网协同（DDS）：后续按需接 [Swarm Spatial Link](https://github.com/zxinyu-robot/swarm-spatial-link)
 
@@ -55,8 +55,16 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 - `EchoStateMemory`：确定性稀疏储备池，按谱半径缩放、带泄漏积分；重置规则包括任务切换、定位重置、跨楼层；支持 washout 和快照恢复。
 - `EdgePolicyManager`：active / candidate 双策略；旁路比对门槛（样本数、否决率、成功率）；连续失败回滚；规则兜底。
 
-状态内核（`src/runtime/`）：
+空间状态契约（`src/contract/`，三个仓库共用，只定义字段与规则，不定义传输）：
 
+- 身份与版本链：`AssetRef`（revision / generation / localization_epoch / frame_id）、`DeltaRef` 与 `dispose()`；generation 变化时旧状态全部作废，localization_epoch 变化时只作废与位姿绑定的状态。
+- 时间与可信度：`Stamp`（时钟域、有效期）、`LocalizationHealth`（定位模式、质量、位姿跳变、重定位进度 `candidate_found` / `alignment_complete` / `alignment_success`）、`ReasonCode`；只有 Normal3D / Degraded2D 允许执行。
+- 任务执行契约：`ExecutionLease`（owner / epoch / expiry / start_deadline）、`IntentEnvelope`、幂等判定；`admit()` 对状态给出 Accept / Reverify / Hold / Reject，`dispose()` 对租约给出接受或具体失效原因。
+- 故障注入 v1（`fault_injection.*`）：定位丢失、位姿跳变、换图、定位重置、过期、断链、租约过期、过期执行者、超时等确定性场景，逐步给出 `admit()` 与 `dispose()` 判决。
+
+任务编排（`src/mission/`）：`MissionOrchestrator` 是机器人无关的参考执行器 / 测试夹具，负责子目标派发、到达判定、恢复阶梯和终态，不做几何规划与设备控制。
+
+状态内核（`src/runtime/`）：
 
 - 状态键：机器人、会话、状态类型、时间戳和实例编号。
 - 状态生命周期：Requested → Initialized → Active / Fixed → Marginalized → Archived。
@@ -72,13 +80,14 @@ EdgePolicyManager ── active 实时决策 │ candidate 在线学习 → 验�
 - ROS 2/DDS 适配器、共享内存传输和持久化。
 - 学习型 Token 编码器、ESN 读出层的离线预训练管线、策略持久化与分发。
 - 多机器人子图融合、回环检测和可视化界面。
-- 实时性能 benchmark 与真机数据集验证。
+- 契约生成的 DDS IDL、弱网传输调度与 Spatial Delta 协议。
+- 实时性能 benchmark 与真机数据集验证（Go2 回放基线进行中）。
 
 这些内容属于后续路线，不是当前版本的完成能力。
 
 ## 快速开始
 
-要求：CMake 3.20+、Make 和支持 C++20 的编译器。
+要求：CMake 3.25+（`CMakePresets.json` 为 v6）、Make 和支持 C++20 的编译器。CMake 3.20–3.24 可以不用 preset：`cmake -S . -B build/default -DBUILD_TESTING=ON && cmake --build build/default && (cd build/default && ctest --output-on-failure)`。
 
 ```bash
 cmake --preset default
@@ -130,7 +139,8 @@ src/cognition/
 src/mission/
   mission_orchestrator.*  # 参考执行器 / 测试夹具（子目标推进/到达判定/恢复阶梯）
 src/contract/
-  spatial_state.*         # 跨仓库空间状态契约：AssetRef / Stamp / LocalizationHealth / ReasonCode
+  spatial_state.*         # 跨仓库空间状态契约：AssetRef / Stamp / LocalizationHealth / ReasonCode / ExecutionLease / admit()
+  fault_injection.*       # 故障注入 v1：确定性失效场景 → admit()/dispose() 判决
 examples/cpp/
   runtime_demo.cpp
   test_spatial_runtime.cpp
@@ -140,16 +150,18 @@ examples/cpp/
 docs/
   architecture.md
   contracts/          # SpatialState / SemanticToken / BehaviorMemory / EdgePolicy / MissionOrchestration 契约
+  plan/               # 完整技术路线、项目执行计划、评价体系等规划文档
 ```
 
 ## 路线图
 
-1. 增加 GTSAM iSAM2 适配器和 SE(3) 状态类型约束。
-2. 增加乱序观测缓冲、并发读快照和可重复 benchmark。
-3. 增加 ROS 2 消息适配器与 rosbag 回放示例。
-4. 使用公开数据集报告吞吐、延迟和内存占用。
+阶段与进度以 [项目执行计划](docs/plan/项目执行计划.md) 为准（总览见 [docs/plan](docs/plan/README.md)）。关键路径：
 
-详细设计边界见 [架构说明](docs/architecture.md)。
+**A 空间状态契约 → A2 任务执行契约 → B 插件化基座 → C Go2 旁路接入 →（D 反馈回流 ∥ D' 断网自治）→ E 电梯用例 + 受限介入 → F 传输调度 + 协议 + 压测**，之后才是 G 异构 + 世界模型、H 多机。
+
+当前：A、A2 已完成；B 剩故障演练接入 MotionSLAM（审核中）和 Go2 回放基线。
+
+状态内核的设计边界见 [架构说明](docs/architecture.md)。
 
 ## License
 
