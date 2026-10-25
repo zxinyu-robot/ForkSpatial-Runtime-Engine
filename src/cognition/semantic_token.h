@@ -105,6 +105,16 @@ private:
     TokenStoreConfig config_;
     std::unordered_map<std::uint64_t, SemanticToken> tokens_;
     std::unordered_map<std::uint64_t, Timestamp> stale_since_;
+    // 逐出墓碑：id → {owner, 最后 revision, 最后 version}。
+    // 只挡同一 (robot_id, session_id) 的更旧延迟观测复活；
+    // 编码器跨会话复用 token_id，新会话不受旧墓碑约束。
+    struct Tombstone {
+        std::uint32_t robot_id{};
+        std::uint32_t session_id{};
+        std::uint64_t revision{};
+        std::uint64_t version{};
+    };
+    std::unordered_map<std::uint64_t, Tombstone> tombstone_;
     std::uint64_t store_version_{};
 };
 
