@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace fork_spatial::contract {
 
@@ -25,6 +26,10 @@ struct AssetRef {
     std::string frame_id;
     std::string asset_type;        // occupancy / octvox / tile / pose_graph …（可选）
     std::uint64_t content_hash{};  // 已提交内容的校验，0 = 未提供
+    // localization_epoch 与 generation 分开：generation 变 = 换图/楼层切换，该 asset 下
+    // 全部状态作废；localization_epoch 变 = 定位重置，只作废位姿锚定的状态。
+    std::uint64_t localization_epoch{};
+    bool pose_anchored{false};     // 位姿锚定（子目标/轨迹/位姿 Token），定位重置后需重新锚定
 
     bool operator==(const AssetRef&) const = default;
 };
@@ -69,7 +74,99 @@ struct Stamp {
     }
 };
 
-// ---------- 3. 原因码（唯一一套，替代 mission::FailureCode 与 failure_code 字符串） ----------
+// ---------- 3. 执行令牌与任务契约（Intent Execution Contract）----------
+// 绑定机器人的可追溯链：每条命令可查谁签发(owner)、第几任(epoch)、基于哪版状态、何时过期。
+// epoch 是防过期控制者的关键：接管一次加一，低 epoch 的命令一律拒绝（随机 UUID 做不到这点）。
+struct ExecutionLease {
+    std::string task_id;
+    std::string owner_id;      // 签发者：边缘节点 / 云 / 本机端侧调度
+    std::uint32_t robot_id{};
+    std::uint64_t epoch{};
+    std::int64_t issued_ns{};
+    std::int64_t expiry_ns{};           // 0 = 不设
+    std::int64_t start_deadline_ns{};   // 最晚开始执行时间，0 = 不限
+    std::int64_t execution_timeout_ns{};// 开始执行后的最长运行时长，0 = 不限
+    ClockDomain clock{ClockDomain::Monotonic};
+    std::int64_t max_skew_ns{};         // 签发方与执行方时钟允许的最大偏差
+    AssetRef state;            // 基于哪版空间状态签发
+
+    ExecutionLease() = default;
+    // PR #7 兼容构造：旧调用只提供任务、租约与状态引用。
+    ExecutionLease(std::string task, std::string owner, std::uint32_t robot,
+                   std::uint64_t lease_epoch, std::int64_t issued,
+                   std::int64_t expiry, AssetRef lease_state)
+        : task_id(std::move(task)), owner_id(std::move(owner)), robot_id(robot),
+          epoch(lease_epoch), issued_ns(issued), expiry_ns(expiry), state(std::move(lease_state)) {}
+
+    bool operator==(const ExecutionLease&) const = default;
+};
+
+enum class LeaseDisposition : std::uint8_t {
+    Accept,
+    WrongRobot,
+    StaleEpoch,     // 比当前已接受的 epoch 低 → 旧执行者，拒绝
+    Expired,
+    StateMismatch,  // 签发所依据的状态代数与本地不符
+    ClockMismatch,  // 时钟域不一致，无法比较过期时间
+    DeadlineMissed, // 未在 start_deadline 开始，或运行超过 execution_timeout
+};
+[[nodiscard]] LeaseDisposition dispose(const ExecutionLease& lease, std::uint32_t robot_id,
+                                       std::uint64_t current_epoch, const AssetRef& local,
+                                       ClockDomain local_clock,
+                                       std::int64_t now_ns) noexcept;
+[[nodiscard]] LeaseDisposition dispose_running(const ExecutionLease& lease,
+                                               std::uint32_t robot_id,
+                                               std::uint64_t current_epoch,
+                                               const AssetRef& local,
+                                               ClockDomain local_clock,
+                                               std::int64_t started_ns,
+                                               std::int64_t now_ns) noexcept;
+// PR #7 compatibility overload: existing monotonic callers need no migration step.
+[[nodiscard]] LeaseDisposition dispose(const ExecutionLease& lease, std::uint32_t robot_id,
+                                       std::uint64_t current_epoch, const AssetRef& local,
+                                       std::int64_t now_ns) noexcept;
+
+// 下行任务 = intent_id（追踪）+ idempotency_key（去重）+ 租约（授权）。
+// 幂等规则：同键同内容 → 返回原任务/原结果；同键不同内容 → 拒绝并记录冲突。
+struct IntentEnvelope {
+    std::string intent_id;
+    std::string idempotency_key;
+    std::uint32_t schema_version{1};
+    ExecutionLease lease;
+
+    bool operator==(const IntentEnvelope&) const = default;
+};
+
+enum class IdempotencyDisposition : std::uint8_t {
+    New,                // 新任务
+    DuplicateSame,      // 同键同内容 → 返回原任务/原结果
+    ConflictDifferent,  // 同键不同内容 → 拒绝（ReasonCode::IdempotencyConflict）
+};
+// stored 为已保存的同键请求；nullptr = 无记录。
+[[nodiscard]] IdempotencyDisposition dispose_idempotency(
+    const IntentEnvelope& incoming, const IntentEnvelope* stored) noexcept;
+
+// 上行数据分类：弱网传输调度器按类别定优先级，类内再按熵/字节/时效排序。
+// DurableEvent 是关键事件（急停/严重故障/任务终止/执行权变化/进入恢复），
+// 不能被后来的最新值覆盖，否则 ESN 状态语言与证据链丢历史。
+enum class UplinkClass : std::uint8_t {
+    DurableEvent,
+    LatestValue,
+    Bulk,
+};
+
+enum class FeedbackStatus : std::uint8_t {
+    Accepted,
+    Running,
+    Blocked,
+    Recovering,
+    Succeeded,
+    Failed,
+    Canceled,
+    Preempted,
+};
+
+// ---------- 4. 原因码（唯一一套，替代 mission::FailureCode 与 failure_code 字符串） ----------
 enum class ReasonCode : std::uint8_t {
     None,
     NoWaypoints,
@@ -87,10 +184,14 @@ enum class ReasonCode : std::uint8_t {
     ResyncRequired,        // 增量基线缺失 / 校验失败，需补齐或快照
     Timeout,               // 任务级超时
     Canceled,
+    LeaseExpired,          // 执行令牌过期
+    DeadlineMissed,        // 错过开始截止或运行超时
+    Preempted,             // 被更高优先级任务抢占
+    IdempotencyConflict,   // 同幂等键不同内容
 };
 [[nodiscard]] std::string_view name(ReasonCode code) noexcept;
 
-// ---------- 4. 空间状态可信度 ----------
+// ---------- 5. 空间状态可信度 ----------
 // 合并：MotionSLAM 规划§6 的 NORMAL_3D/DEGRADED_2D/RELOCALIZING/VERIFYING/HOLD、
 // task_runtime::SafetyMode、legged-navigation RecoveryState、Go2 /lio/* 话题。
 enum class LocalizationMode : std::uint8_t {
@@ -133,10 +234,42 @@ struct SpatialStateHeader {
     LocalizationHealth health;
 };
 
-// 消费方在使用前调用：代数不匹配 → AssetStale；过期 → 拒收；mode 不可用 → 拒收。
-[[nodiscard]] ReasonCode admit(const SpatialStateHeader& header,
-                               const AssetRef& expected,
-                               std::int64_t now_ns) noexcept;
+// 版本/时效/可信度不匹配分三种处理，不是一律拒绝：
+//   Reverify = 定位重置等仍可确定性重锚定的 → 允许重新验证/重规划；
+//   Hold     = 无法确认匹配（定位不可用/处于 Hold）→ 暂停并进入恢复；
+//   Reject   = 语义失效（generation 不符/已过期）→ 拒绝。
+enum class AdmitDisposition : std::uint8_t {
+    Accept,
+    Reverify,
+    Hold,
+    Reject,
+};
+struct AdmitResult {
+    AdmitDisposition disposition{AdmitDisposition::Accept};
+    ReasonCode reason{ReasonCode::None};
+
+    // 保留 PR #7 调用方的原因码比较方式，同时让新调用方读取处理动作。
+    friend constexpr bool operator==(const AdmitResult& result, ReasonCode code) noexcept {
+        return result.reason == code;
+    }
+    friend constexpr bool operator==(ReasonCode code, const AdmitResult& result) noexcept {
+        return result == code;
+    }
+};
+[[nodiscard]] AdmitResult admit(const SpatialStateHeader& header,
+                                const AssetRef& expected,
+                                std::int64_t now_ns) noexcept;
+
+// ---------- 6. 恢复结果 ----------
+// "可信度 → 恢复动作 → 恢复结果验证"的最后一段；喂给经验库。
+struct RecoveryOutcome {
+    ReasonCode trigger{ReasonCode::None};  // 进入恢复的原因
+    std::string action;                     // 实际执行的恢复动作
+    std::int64_t duration_ns{0};            // 恢复耗时
+    double cost{0.0};                       // 恢复代价（时间/行程折算的标量，先占位）
+    bool resumed{false};                    // 恢复后状态是否满足继续执行条件
+    AssetRef post_state;                    // 恢复后用于继续执行的状态版本
+};
 
 }  // namespace fork_spatial::contract
 

@@ -22,13 +22,16 @@
 | `robot_id` / `session_id` | 本次运行上下文 | `session_id` / `NavigationContextState.session_id` | — | `ResourceRef.robot_id/session_id` |
 | `asset_id` | 资产身份，建议 `building/floor/map/tile` | `building_id + floor_id + map_id + tile_id` | — | `ResourceRef.asset_id` |
 | `revision` | 资产**内容**版本 | `map_version` / `layer_version` | — | `ResourceRef.revision` |
-| `generation` | 上下文**代数**；变化 ⇒ 旧状态/子目标/轨迹全部作废 | `generation` / `context_generation` | （定位重置点） | **新增** `ResourceRef.generation` |
+| `generation` | 上下文**代数**；变化 ⇒ 旧状态/子目标/轨迹全部作废 | `generation` / `context_generation` | 楼层/地图切换 | `ResourceRef.generation` |
+| `localization_epoch` | 定位有效周期；变化只作废位姿锚定状态 | `localization_epoch`（适配层补齐） | 定位重置 | `ResourceRef.localization_epoch` |
+| `pose_anchored` | 是否绑定位姿锚点；决定是否受定位代数变化影响 | `pose_anchored` | — | `ResourceRef.pose_anchored` |
 | `frame_id` | 坐标解释，必填无默认 | `frame_id`（Go2 默认 `world`） | — | `ResourceRef.frame_id`（原默认 `map`） |
 
 四个字段不可互替：
 
 - `revision` 变但 `generation` 不变 ⇒ 局部更新，消费方可继续（`same_generation()` 为真）。
-- `generation` 变 ⇒ `TokenStore::invalidate_generation()`，**TTL 未到也作废**；`admit()` 返回 `AssetStale`。
+- `generation` 变 ⇒ `TokenStore::invalidate_generation()`，**TTL 未到也作废**；`admit()` 返回 `Reject / AssetStale`。
+- `localization_epoch` 变且状态带位姿锚定 ⇒ `admit()` 返回 `Reverify`，重新定位/重规划后才能继续；不带位姿锚定的资产不因定位重置整体作废。
 - `frame_id` 为空 ⇒ `validate()` 拒收，不允许隐式 world/map。
 
 `AssetRef` 另有可选 `asset_type`、`content_hash`。**Token 流不是身份**：`SemanticToken.token_id` 与
@@ -47,6 +50,39 @@ base_revision == 本地 revision   → Apply
 
 本地在 40、收到 `delta(base=42→43)` 时不得盲目应用——这是三个仓库目前都没有定义的规则。
 `codec_id` 只是同步层内部的编码选择（原始差分 / 量化 / Token 流），资产层不感知。
+
+## 1c. 执行令牌与 Intent Execution Contract（系统令牌，不是语义 Token）
+
+绑定机器人的可追溯链：每条命令可查谁签发、第几任、基于哪版状态、何时过期。
+
+```
+ExecutionLease{task_id, owner_id, robot_id, epoch, issued_ns, expiry_ns,
+               start_deadline_ns, execution_timeout_ns, clock, max_skew, state: AssetRef}
+robot_id 不符                 → WrongRobot
+epoch < 本地已接受的 epoch     → StaleEpoch（掉线的旧执行者还在发命令，拒绝）
+clock 域不符                  → ClockMismatch
+过期                          → Expired
+state 与本地不同代/定位锚定不符 → StateMismatch（基于旧地图/旧位姿签发的命令，拒绝）
+否则                          → Accept
+```
+
+`epoch` 是关键：接管一次加一；随机 UUID / 访问令牌做不到"拒绝旧任执行者"。多节点接管的协商机制后置，字段先进契约，
+否则 Go2 回放日志里没有 owner/epoch，可追溯链断在起点。
+
+幂等规则：`intent_id` 用于跨系统追踪；`idempotency_key` 用于去重。同键同内容返回原任务/原结果；同键不同内容返回 `IdempotencyConflict`。
+
+反馈状态：`ACCEPTED / RUNNING / BLOCKED / RECOVERING / SUCCEEDED / FAILED / CANCELLED / PREEMPTED`。
+
+## 1d. 语义 Token 的混合表示（三条规则）
+
+1. **连续量保留数值**（台阶高度、位姿、速度、协方差）：走 SHM 给局部规划/控制，不离散化；Token 里只放引用或摘要。
+2. **离散量用 Token**（地形类别、风险等级、事件、任务意图）：词表先当契约定（枚举），带 `SemanticToken.vocab_version`，不先学。
+3. **稀疏结构用索引**（栅格块、关键帧、Frontier）：Token 引用 `AssetRef` + 索引，不内嵌数据。
+
+`SemanticToken` 还要记录 `source`、`verification_status`、`evidence_ref` 和 `vocab_version`：下游模型必须能区分来源、是否已验证、依据哪条日志/恢复证据，以及使用哪一版词表。
+
+编解码器只在异步上行链路（Token + 增量 → 边缘/云），永不进控制回路。Token 化是否值得由数字决定：
+带宽、重建误差、新鲜度、过期拒绝率、P50/P95/P99 决策时延。
 
 ## 2. 时间 `Stamp`
 
@@ -99,12 +135,17 @@ LNR 的 ms 字段在适配层乘 1e6；Go2 信封的 ns-or-ms 二选一在适配
 
 ## 6. 消费规则 `admit()`
 
+`admit()` 返回处理动作和原因码，运行期与一次性准入复用同一规则：
+
 ```
-generation 不匹配 → AssetStale
-stamp 过期        → AssetStale
-mode 不可用       → health.reason（为 None 时退化为 LocalizationLost）
-否则              → None
+generation 不匹配 → Reject / AssetStale
+stamp 过期        → Reject / AssetStale
+localization_epoch 不匹配且 pose_anchored → Reverify / LocalizationLost
+无法确认状态      → Hold / health.reason
+状态可用          → Accept / None
 ```
+
+`RecoveryOutcome{trigger, action, duration_ns, cost, resumed, post_state}`记录恢复后的验证结果，供结构化经验库使用。
 
 ## 7. 验收用例（`examples/cpp/test_contract.cpp`）
 
@@ -118,3 +159,7 @@ mode 不可用       → health.reason（为 None 时退化为 LocalizationLost�
 | 安全否决 | `vetoed && failure_code == SafetyVeto` |
 | 执行超时 | `Timeout` / `RelocalizationTimeout` 命名；不可用 mode 无 reason 时退化为 `LocalizationLost` |
 | 增量乱序 / 缺失 | 本地 40 不得应用 `delta(42→43)`；重复投递幂等；代数变化丢弃 |
+| 过期执行者 | edge_a 掉线、edge_b 以 epoch 8 接管后，edge_a 的 epoch 7 命令被拒；过期 / 异机 / 旧代 / 时钟域不符同样被拒 |
+| Intent 幂等 | 同键同内容返回原任务；同键不同内容返回 `IdempotencyConflict` |
+| localization_epoch | 定位代数变化只要求位姿锚定 Token 重新验证，不作废普通空间资产 |
+| 恢复结果 | `RecoveryOutcome` 记录动作、耗时、代价和是否满足继续条件 |

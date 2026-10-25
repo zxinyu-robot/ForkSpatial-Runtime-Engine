@@ -8,6 +8,14 @@ bool same_generation(const AssetRef& a, const AssetRef& b) noexcept {
            a.generation == b.generation;
 }
 
+namespace {
+bool same_pose_context(const AssetRef& a, const AssetRef& b) noexcept {
+    return same_generation(a, b) &&
+           ((!a.pose_anchored && !b.pose_anchored) ||
+            a.localization_epoch == b.localization_epoch);
+}
+}
+
 bool validate(const AssetRef& ref, std::string& error) {
     if (ref.asset_id.empty()) {
         error = "asset_id empty";
@@ -33,6 +41,63 @@ DeltaDisposition dispose(const DeltaRef& delta, const AssetRef& local) noexcept 
     return DeltaDisposition::MissingDeltas;
 }
 
+LeaseDisposition dispose(const ExecutionLease& lease, std::uint32_t robot_id,
+                         std::uint64_t current_epoch, const AssetRef& local,
+                         ClockDomain local_clock, std::int64_t now_ns) noexcept {
+    if (lease.robot_id != robot_id) {
+        return LeaseDisposition::WrongRobot;
+    }
+    if (lease.epoch < current_epoch) {
+        return LeaseDisposition::StaleEpoch;
+    }
+    if (lease.clock != local_clock) {
+        return LeaseDisposition::ClockMismatch;
+    }
+    if (lease.start_deadline_ns != 0 && now_ns > lease.start_deadline_ns) {
+        return LeaseDisposition::DeadlineMissed;
+    }
+    if (lease.expiry_ns != 0 && now_ns > lease.expiry_ns) {
+        return LeaseDisposition::Expired;
+    }
+    if (!same_pose_context(lease.state, local)) {
+        return LeaseDisposition::StateMismatch;
+    }
+    return LeaseDisposition::Accept;
+}
+
+IdempotencyDisposition dispose_idempotency(const IntentEnvelope& incoming,
+                                           const IntentEnvelope* stored) noexcept {
+    if (stored == nullptr) {
+        return IdempotencyDisposition::New;
+    }
+    if (incoming.idempotency_key != stored->idempotency_key) {
+        return IdempotencyDisposition::New;
+    }
+    return incoming == *stored ? IdempotencyDisposition::DuplicateSame
+                               : IdempotencyDisposition::ConflictDifferent;
+}
+
+LeaseDisposition dispose_running(const ExecutionLease& lease, std::uint32_t robot_id,
+                                 std::uint64_t current_epoch, const AssetRef& local,
+                                 ClockDomain local_clock, std::int64_t started_ns,
+                                 std::int64_t now_ns) noexcept {
+    const auto admission = dispose(lease, robot_id, current_epoch, local, local_clock, started_ns);
+    if (admission != LeaseDisposition::Accept) {
+        return admission;
+    }
+    if (lease.execution_timeout_ns != 0 &&
+        now_ns >= started_ns && now_ns - started_ns > lease.execution_timeout_ns) {
+        return LeaseDisposition::DeadlineMissed;
+    }
+    return LeaseDisposition::Accept;
+}
+
+LeaseDisposition dispose(const ExecutionLease& lease, std::uint32_t robot_id,
+                         std::uint64_t current_epoch, const AssetRef& local,
+                         std::int64_t now_ns) noexcept {
+    return dispose(lease, robot_id, current_epoch, local, ClockDomain::Monotonic, now_ns);
+}
+
 std::string_view name(ReasonCode code) noexcept {
     switch (code) {
         case ReasonCode::None: return "none";
@@ -51,6 +116,10 @@ std::string_view name(ReasonCode code) noexcept {
         case ReasonCode::ResyncRequired: return "resync_required";
         case ReasonCode::Timeout: return "timeout";
         case ReasonCode::Canceled: return "canceled";
+        case ReasonCode::LeaseExpired: return "lease_expired";
+        case ReasonCode::DeadlineMissed: return "deadline_missed";
+        case ReasonCode::Preempted: return "preempted";
+        case ReasonCode::IdempotencyConflict: return "idempotency_conflict";
     }
     return "unknown";
 }
@@ -77,19 +146,31 @@ ExecutionAuthority authority_for(LocalizationMode mode) noexcept {
     return ExecutionAuthority::Revoked;
 }
 
-ReasonCode admit(const SpatialStateHeader& header, const AssetRef& expected,
-                 std::int64_t now_ns) noexcept {
-    if (!same_generation(header.asset, expected)) {
-        return ReasonCode::AssetStale;
+AdmitResult admit(const SpatialStateHeader& header, const AssetRef& expected,
+                  std::int64_t now_ns) noexcept {
+    if (header.asset.robot_id != expected.robot_id ||
+        header.asset.session_id != expected.session_id ||
+        header.asset.asset_id != expected.asset_id ||
+        header.asset.frame_id != expected.frame_id ||
+        header.asset.generation != expected.generation) {
+        return {AdmitDisposition::Reject, ReasonCode::AssetStale};
     }
     if (header.stamp.expired_at(now_ns)) {
-        return ReasonCode::AssetStale;
+        return {AdmitDisposition::Reject, ReasonCode::AssetStale};
+    }
+    if (header.asset.localization_epoch != expected.localization_epoch) {
+        if (header.asset.pose_anchored || expected.pose_anchored) {
+            return {AdmitDisposition::Reverify, ReasonCode::LocalizationLost};
+        }
     }
     if (!header.health.usable()) {
-        return header.health.reason != ReasonCode::None ? header.health.reason
-                                                        : ReasonCode::LocalizationLost;
+        return {header.health.mode == LocalizationMode::Hold
+                    ? AdmitDisposition::Hold
+                    : AdmitDisposition::Reverify,
+                header.health.reason != ReasonCode::None ? header.health.reason
+                                                         : ReasonCode::LocalizationLost};
     }
-    return ReasonCode::None;
+    return {AdmitDisposition::Accept, ReasonCode::None};
 }
 
 }  // namespace fork_spatial::contract

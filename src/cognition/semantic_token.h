@@ -45,6 +45,8 @@ struct ResourceRef {
     std::uint64_t revision{};
     std::string frame_id;
     std::uint64_t generation{};  // 上下文代数，见 contract::AssetRef
+    std::uint64_t localization_epoch{};
+    bool pose_anchored{false};
 
     contract::AssetRef as_asset_ref() const {
         contract::AssetRef ref;
@@ -54,6 +56,8 @@ struct ResourceRef {
         ref.revision = revision;
         ref.generation = generation;
         ref.frame_id = frame_id;
+        ref.localization_epoch = localization_epoch;
+        ref.pose_anchored = pose_anchored;
         return ref;
     }
 };
@@ -69,6 +73,10 @@ struct SemanticToken {
     double confidence{0.0};
     TokenStatus status{TokenStatus::Valid};
     std::uint64_t version{};
+    std::uint32_t vocab_version{1};  // 词表版本：词表先当契约定（枚举），不先学；变更不改资产身份
+    std::string source;              // 传感器/估计器/模型/人工等来源
+    std::string verification_status; // unverified / verified / invalid
+    std::string evidence_ref;        // rosbag、fragment log 或恢复证据引用
 };
 
 enum class UpsertCode {
