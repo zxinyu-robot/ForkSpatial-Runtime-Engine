@@ -75,6 +75,30 @@ bool has_cmd(const std::vector<MissionCommand>& cmds, CommandType t) {
     return false;
 }
 
+void test_label_passthrough() {
+    MissionOrchestrator o(fast_cfg());
+    MissionRequest r;
+    r.subgoals = {{2.0, 0.0, 0.35, "map", 0.45, "chair"}};
+    expect(o.submit(r), "submit accepted");
+    drive(o, at(0, 0, 0.35, 0.0, 0.1), true);
+    drive(o, at(0, 0, 0.35, 0.0, 0.3), true);
+    drive(o, at(0, 0, 0.35, 0.0, 0.5), true);
+    auto cmds = drive(o, at(0, 0, 0.35, 0.0, 1.1), true);
+    const MissionCommand* disp = nullptr;
+    for (const auto& c : cmds)
+        if (c.type == CommandType::DispatchSubgoal) disp = &c;
+    expect(disp && disp->target.label == "chair", "dispatch carries label");
+    bool saw_dispatch_label = false;
+    for (const auto& e : o.events())
+        if (e.name == "subgoal_dispatched" && e.detail == "chair") saw_dispatch_label = true;
+    expect(saw_dispatch_label, "dispatch event carries label in detail");
+    cmds = drive(o, at(2.0, 0, 0.35, 0.05, 3.0), true);
+    bool saw_reach_label = false;
+    for (const auto& e : o.events())
+        if (e.name == "subgoal_reached" && e.detail == "chair") saw_reach_label = true;
+    expect(saw_reach_label, "reached event carries label in detail");
+}
+
 void test_happy_path() {
     MissionOrchestrator o(fast_cfg());
     expect(o.submit(two_subgoals()), "submit accepted");
@@ -226,6 +250,7 @@ void test_cancel_and_empty() {
 }  // namespace
 
 int main() {
+    test_label_passthrough();
     test_happy_path();
     test_stuck_then_fail();
     test_localization_lost_recovery();

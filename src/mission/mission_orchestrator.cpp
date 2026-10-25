@@ -68,7 +68,8 @@ public:
         dispatched = true;
         dispatch_s = now;
         plan_deadline_s = now + cfg.plan_ready_timeout_s;
-        emit("subgoal_dispatched");
+        emit("subgoal_dispatched",
+             idx < request.subgoals.size() ? request.subgoals[idx].label : "");
         queue(CommandType::DispatchSubgoal);
     }
 
@@ -216,7 +217,7 @@ public:
             dist <= sg.reach_tolerance_m && st.speed_mps <= cfg.reach_stable_speed_mps &&
             now - dispatch_s >= cfg.min_execute_before_reach_s;
         if (reached) {
-            emit("subgoal_reached");
+            emit("subgoal_reached", sg.label);
             ++idx;
             if (idx >= request.subgoals.size()) {
                 status = MissionStatus::Succeeded;

@@ -46,6 +46,7 @@ struct Subgoal {
     double x{}, y{}, z{};
     std::string frame_id{"map"};
     double reach_tolerance_m{0.45};
+    std::string label;  // 语义目标标签（如物体类别/名称），仅随事件透传，不影响度量判定
 };
 
 struct MissionRequest {
