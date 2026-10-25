@@ -125,6 +125,10 @@ LNR 的 ms 字段在适配层乘 1e6；Go2 信封的 ns-or-ms 二选一在适配
 数值字段：`quality`（→ `Token.confidence` / `localization_quality`）、`pose_jump_m`、
 `alignment_fitness`（→ `/lio/relocation/fitness`）、`healthy_frames`、`stance_ok`（→ `/local_map/stance_ok`）、`reason`。
 
+重定位进度：`candidate_found`（找到候选位姿）、`alignment_complete`（精配准结束）、`alignment_success`（精配准收敛）。
+LNR 状态机靠这三项离开 `Searching/Aligning`（→ LNR `descriptor_candidate_found / alignment_complete / alignment_success`）；
+故障注入 `LocalizationLost / PoseJump` 清零、`Recover` 置为成功。
+
 ## 5. 认知层接入点
 
 - `TokenStore::invalidate_generation(AssetRef current)`：同 asset 下 `generation` 落后的 Token 全部 Evicted。

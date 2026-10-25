@@ -15,7 +15,7 @@ namespace fork_spatial::contract {
 
 enum class FaultKind : std::uint8_t {
     Noop,                   // 只推进时间
-    LocalizationLost,       // health.mode = Hold（定位失效）
+    LocalizationLost,       // health.mode = Hold（定位失效），清重定位进度
     PoseJump,               // health.pose_jump_m = amount，mode = Relocalizing
     GenerationBump,         // expected.generation++（换图/楼层切换，全作废）
     LocalizationEpochBump,  // expected.localization_epoch++（定位重置，只作废位姿锚定）
@@ -24,7 +24,7 @@ enum class FaultKind : std::uint8_t {
     LeaseExpired,           // lease.expiry_ns 设为过去
     WrongOwnerEpoch,        // current_epoch 超过 lease.epoch（过期执行者）
     DeadlineMiss,           // 推进时间越过 lease.start_deadline_ns
-    Recover,                // health 恢复 Normal3D / quality=1 / reason=None
+    Recover,                // health 恢复 Normal3D / quality=1 / reason=None，重定位进度置为成功
 };
 
 struct FaultWorld {
