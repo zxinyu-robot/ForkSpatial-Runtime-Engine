@@ -1320,7 +1320,8 @@ details.a-disclosure[open] > summary::before {
     </svg>
   </div>
   <div data-a-inspector class="a-panel" style="margin-top:0.75rem;padding:0.75rem">
-    <p class="a-prose">点击节点查看职责与状态。</p>
+    <h3 class="a-phase__title" data-a-inspector-title>点击节点查看职责与状态。</h3>
+    <p class="a-prose" data-a-inspector-body></p>
   </div>
 </div>
 
@@ -2411,7 +2412,7 @@ details.a-disclosure[open] > summary::before {
       });
     });
 
-    var inspector = diagram.querySelector("[data-a-inspector]");
+    var inspector = (diagram.parentElement || diagram).querySelector("[data-a-inspector]");
     var select = function (node) {
       diagram.querySelectorAll("[data-a-node]").forEach(function (other) {
         other.setAttribute("aria-current", String(other === node));
