@@ -2,6 +2,14 @@
 
 namespace fork_spatial::contract {
 
+namespace {
+void clear_relocalization(LocalizationHealth& health) {
+    health.candidate_found = false;
+    health.alignment_complete = false;
+    health.alignment_success = false;
+}
+}  // namespace
+
 FaultWorld healthy_world() {
     FaultWorld world;
     world.expected = AssetRef{1, 1, "map.f1", 3, 2, "world", "occupancy", 0, 7, false};
@@ -22,11 +30,13 @@ StepResult inject(FaultWorld& world, const FaultStep& step) {
         case FaultKind::LocalizationLost:
             world.header.health.mode = LocalizationMode::Hold;
             world.header.health.reason = ReasonCode::LocalizationLost;
+            clear_relocalization(world.header.health);
             break;
         case FaultKind::PoseJump:
             world.header.health.mode = LocalizationMode::Relocalizing;
             world.header.health.pose_jump_m = step.amount;
             world.header.health.reason = ReasonCode::LocalizationJump;
+            clear_relocalization(world.header.health);
             break;
         case FaultKind::GenerationBump:
             ++world.expected.generation;
@@ -57,6 +67,9 @@ StepResult inject(FaultWorld& world, const FaultStep& step) {
             world.header.health.quality = 1.0;
             world.header.health.pose_jump_m = 0.0;
             world.header.health.reason = ReasonCode::None;
+            world.header.health.candidate_found = true;
+            world.header.health.alignment_complete = true;
+            world.header.health.alignment_success = true;
             world.header.asset = world.expected;
             world.lease.state = world.expected;
             break;

@@ -219,6 +219,10 @@ struct LocalizationHealth {
     double alignment_fitness{0.0};  // ← LNR alignment_fitness / Go2 /lio/relocation/fitness
     std::uint32_t healthy_frames{}; // ← LNR healthy_frames_to_resume 计数
     bool stance_ok{true};           // ← Go2 /local_map/stance_ok
+    // 重定位进度（LNR Searching→Aligning→Verifying 需要）：
+    bool candidate_found{false};    // ← Go2 /lio/relocation 候选 / LNR descriptor_candidate_found
+    bool alignment_complete{false}; // ← 精配准已结束（无论成败）
+    bool alignment_success{false};  // ← 精配准收敛（fitness 达标另由 alignment_fitness 判）
     ReasonCode reason{ReasonCode::None};
 
     [[nodiscard]] ExecutionAuthority authority() const noexcept { return authority_for(mode); }

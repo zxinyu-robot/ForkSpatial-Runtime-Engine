@@ -249,6 +249,25 @@ void case_fault_injection() {
         expect(results[1].admit.disposition == AdmitDisposition::Accept, "fault: results[1].admit.disposition == AdmitDisposition::Accept");
     }
 
+    // 场景 1b：重定位进度随故障清零、随恢复置为成功
+    {
+        auto world = healthy_world();
+        expect(!world.header.health.candidate_found && !world.header.health.alignment_success,
+               "fault: healthy world has no relocalization progress");
+        (void)inject(world, {FaultKind::Recover, 0});
+        expect(world.header.health.candidate_found && world.header.health.alignment_complete &&
+                   world.header.health.alignment_success,
+               "fault: Recover reports relocalization success");
+        (void)inject(world, {FaultKind::PoseJump, 0, 2.0});
+        expect(!world.header.health.candidate_found && !world.header.health.alignment_complete &&
+                   !world.header.health.alignment_success,
+               "fault: PoseJump clears relocalization progress");
+        (void)inject(world, {FaultKind::Recover, 0});
+        (void)inject(world, {FaultKind::LocalizationLost, 0});
+        expect(!world.header.health.alignment_success,
+               "fault: LocalizationLost clears relocalization progress");
+    }
+
     // 场景 2：位姿跳变（定位重置）→ 位姿锚定状态 Reverify；换图 → Reject
     {
         auto world = healthy_world();
