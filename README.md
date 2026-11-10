@@ -39,7 +39,7 @@
 - 状态内核：因子批次校验、原子提交、固定延迟窗口和后端无关接口。
 - 故障注入 v1：定位丢失、位姿跳变、换图、定位重置、过期、断链和租约失效等确定性场景。
 
-## 架构
+## 架构与案例 C 展示
 
 ```text
 World State → Token Encoder + TokenStore → EchoStateMemory
@@ -50,6 +50,10 @@ World State → Token Encoder + TokenStore → EchoStateMemory
                          ↓
               DecisionOutcome → state and learning feedback
 ```
+
+下面的系统流程图用于说明空间状态、任务意图与安全动作之间的边界和回流关系；它属于本仓库的运行时与状态契约说明。案例 B 的机器人导航演示素材保留在 [quadruped-crossfloor-nav-ws](https://github.com/zxinyu-robot/quadruped-crossfloor-nav-ws)。
+
+![空间状态到安全执行的数据状态流转](https://raw.githubusercontent.com/zxinyu-robot/quadruped-crossfloor-nav-ws/main/docs/media/state_flow_seq.png)
 
 契约文档：[SpatialState](docs/contracts/spatial_state.md) · [SemanticToken](docs/contracts/semantic_token.md) · [BehaviorMemory](docs/contracts/behavior_memory.md) · [EdgePolicy](docs/contracts/edge_policy.md) · [MissionOrchestration](docs/contracts/mission_orchestration.md) · [状态内核架构](docs/architecture.md)
 
@@ -118,9 +122,9 @@ examples/cpp/      runtime、认知、任务和契约示例测试
 
 ## 关联项目
 
-- [quadruped-crossfloor-nav-ws](https://github.com/zxinyu-robot/quadruped-crossfloor-nav-ws)：Go2 跨楼层自主导航。
+- [quadruped-crossfloor-nav-ws](https://github.com/zxinyu-robot/quadruped-crossfloor-nav-ws)：案例 B，Go2 跨楼层自主导航和真机 / 回放演示。
 - [legged-navigation-runtime](https://github.com/zxinyu-robot/legged-navigation-runtime)：定位故障恢复与多楼层导航。
-- [swarm-spatial-link](https://github.com/zxinyu-robot/swarm-spatial-link)：多机器人弱网协同通信。
+- [swarm-adapter-foundation](https://github.com/zxinyu-robot/swarm-adapter-foundation)：多机器人弱网协同通信。
 
 ## 许可证
 
